@@ -1,0 +1,36 @@
+# Example Portainer stack (docker-compose format) for multi-omp.
+#
+# Portainer: Stack -> Add stack -> paste the part below the `---` line,
+# or upload this file. Then open http://<host>:30140/ .
+#
+# Environment variables (all optional, defaults shown):
+#   MULTI_OMP_PORT      30140   gateway/dashboard port
+#   MULTI_OMP_HOST      0.0.0.0 bind address (0.0.0.0 inside a container)
+#   MULTI_OMP_HOME      /data   data dir holding nodes.json
+---
+services:
+  multi-omp:
+    image: multi-omp:latest
+    container_name: multi-omp
+    restart: unless-stopped
+    ports:
+      - "30140:30140"
+      - "30200-30299:30200-30299"
+    environment:
+      MULTI_OMP_PORT: "30140"
+      MULTI_OMP_HOST: "0.0.0.0"
+      MULTI_OMP_HOME: /data
+    volumes:
+      - multi-omp-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:30140/api/health').then(r => process.exit(r.ok ? 0 : 1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  multi-omp-data:
+
+# Building the image (done once, before deploying the stack):
+#   docker build -t multi-omp:latest .
