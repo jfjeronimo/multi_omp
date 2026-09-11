@@ -7,26 +7,9 @@
  * verifies availability by actually binding before it commits to a port.
  */
 
-/** First local port handed out to a node (inclusive). */
-export const FIRST_NODE_PORT = 30200;
-/** Last local port a node may take (inclusive). */
-export const LAST_NODE_PORT = 30299;
-
 /** Yield every port in [first, last] in order. */
 export function* rangePorts(first: number, last: number): Generator<number> {
   for (let p = first; p <= last; p++) yield p;
-}
-
-/**
- * Pick the first port in [first, last] not in `used`. Returns null when the
- * range is exhausted. Callers must still verify the port binds (the OS may
- * hold a port this process cannot see).
- */
-export function allocatePort(used: ReadonlySet<number>, first = FIRST_NODE_PORT, last = LAST_NODE_PORT): number | null {
-  for (const p of rangePorts(first, last)) {
-    if (!used.has(p)) return p;
-  }
-  return null;
 }
 
 /**

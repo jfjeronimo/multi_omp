@@ -6,12 +6,14 @@ import { startMockUpstream, type MockUpstream } from "./helpers/mock-upstream";
 
 describe("gateway", () => {
   let mock: MockUpstream;
+  let mock2: MockUpstream;
   let store: MemoryNodeStore;
   let gw: Gateway;
   let nodePort: number;
 
   beforeAll(async () => {
     mock = await startMockUpstream({ locked: true });
+    mock2 = await startMockUpstream();
     store = new MemoryNodeStore();
     // Pre-allocate a fixed port so the test can hit the node listener directly.
     store.add({ id: "rasp", name: "Raspberry", url: mock.url, password: "mock-pass", port: 30500 });
@@ -28,6 +30,7 @@ describe("gateway", () => {
   afterAll(() => {
     gw.stop();
     mock.server.stop(true);
+    mock2.server.stop(true);
   });
 
   test("dashboard renders with node, status and local url", async () => {
@@ -56,6 +59,18 @@ describe("gateway", () => {
   test("unknown node -> 404", async () => {
     const res = await gw.handle(new Request("http://gw/api/nodes/nope"));
     expect(res.status).toBe(404);
+  });
+
+  test("POST /api/nodes/:id -> 405 (updates are PATCH)", async () => {
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Raspberry" }),
+      }),
+    );
+    expect(res.status).toBe(405);
+    expect(((await res.json()) as { error: string }).error).toBe("Method not allowed");
   });
 
   test("POST /api/nodes adds a node and allocates a port in range", async () => {
@@ -166,20 +181,30 @@ describe("gateway", () => {
     expect((await gw.handle(new Request("http://gw/api/nodes/-bad"))).status).toBe(400);
   });
 
-  test("PATCH url change takes effect without restart (listener keeps its port)", async () => {
-    const before = mock.requests.length;
+  test("PATCH url change redirects to the new origin without rebind", async () => {
+    // Point the node at mock2; the listener must keep its port and proxy
+    // to the new origin immediately (fresh per-request store read).
     const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: mock2.url }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(store.get("rasp")?.port).toBe(nodePort);
+    const before = mock2.requests.length;
+    const html = await (await fetch(`http://127.0.0.1:${nodePort}/`)).text();
+    expect(html).toContain("MOCK APP");
+    expect(mock2.requests.slice(before).length).toBeGreaterThan(0);
+    // Restore the original origin for the tests that follow.
+    await gw.handle(
       new Request("http://gw/api/nodes/rasp", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: mock.url }),
       }),
     );
-    expect(res.status).toBe(200);
-    expect(store.get("rasp")?.port).toBe(nodePort);
-    const html = await (await fetch(`http://127.0.0.1:${nodePort}/`)).text();
-    expect(html).toContain("MOCK APP");
-    expect(mock.requests.slice(before).every((r) => r.host === `127.0.0.1:${mock.port}`)).toBe(true);
   });
 
   test("PATCH credential change takes effect immediately", async () => {

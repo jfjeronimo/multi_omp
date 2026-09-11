@@ -145,9 +145,10 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
 <script>
 (function () {
   const $ = (s) => document.querySelector(s);
-  const post = async (url, body) => {
+  const post = async (url, body, method) => {
+    const m = method ?? (body === undefined ? "DELETE" : "POST");
     const res = await fetch(url, {
-      method: body === undefined ? "DELETE" : "POST",
+      method: m,
       headers: body === undefined ? {} : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -199,7 +200,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
         url: $("#e-url").value,
         password: $("#e-pass").value || undefined,
         note: $("#e-note").value || undefined,
-      });
+      }, "PATCH");
       location.reload();
     } catch (e2) { err.textContent = e2.message; }
   });

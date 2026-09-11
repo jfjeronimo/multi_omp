@@ -16,7 +16,7 @@ import type { NodeStore, OmpNode } from "./store";
 import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest } from "./proxy";
-import { FIRST_NODE_PORT, LAST_NODE_PORT, probePortFree, rangePorts } from "./ports";
+import { probePortFree, rangePorts } from "./ports";
 import { renderDashboard, type DashboardNode } from "./dashboard";
 
 /** Bun's HTTP server (WebSocketData = unknown, the default). */
@@ -36,7 +36,7 @@ export interface Gateway {
   handle(req: Request): Promise<Response>;
   /** Register a node: allocate/reuse a port, persist it, start its proxy. */
   addNode(input: Omit<OmpNode, "id"> & { id?: string }): Promise<{ node: OmpNode; status: NodeStatus }>;
-  /** Update a node's url/credentials; restart its listener when the origin changed. */
+  /** Update a node's url/credentials; rebind its listener only when the port changed. */
   updateNode(id: string, patch: Partial<OmpNode>): Promise<{ node: OmpNode; status: NodeStatus }>;
   /** Stop a node's listener and remove it from the store. */
   removeNode(id: string): boolean;
@@ -138,12 +138,6 @@ export function createGateway(opts: GatewayOptions): Gateway {
     return startNodeServer(node);
   }
 
-  /** Restart a listener so url/credential/port changes take effect now. */
-  function restartNodeServer(node: OmpNode): NodeListener {
-    stopNodeServer(node.id);
-    return startNodeServer(node);
-  }
-
   async function withStatus(node: OmpNode): Promise<{ node: OmpNode; status: NodeStatus }> {
     return { node, status: await statusOf(node) };
   }
@@ -191,7 +185,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     patch: Partial<OmpNode>,
   ): Promise<{ node: OmpNode; status: NodeStatus }> {
     const updated = opts.store.update(id, patch);
-    restartNodeServer(updated);
+    ensureNodeServer(updated);
     return withStatus(updated);
   }
 
@@ -352,11 +346,14 @@ export function createGateway(opts: GatewayOptions): Gateway {
     try {
       ensureNodeServer(node);
     } catch {
-      const fresh = { ...node, port: undefined };
+      // Saved port is now held: clear it and try to allocate a fresh one.
       try {
         opts.store.update(node.id, { port: undefined });
-        ensureNodeServer(fresh);
+        ensureNodeServer({ ...node, port: undefined });
       } catch (e) {
+        // Nothing available in the whole range: restore the saved port so the
+        // node keeps its record and the next boot can retry.
+        if (node.port !== undefined) opts.store.update(node.id, { port: node.port });
         console.error(`multi-omp: could not start proxy for node ${node.id}: ${(e as Error).message}`);
       }
     }

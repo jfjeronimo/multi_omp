@@ -71,6 +71,18 @@ Each node gets a local port from `30200–30299` (shown in the dashboard's
 | `MULTI_OMP_HOST` (or `HOSTNAME_BIND`) | `127.0.0.1` | bind address |
 | `MULTI_OMP_HOME` | `~/.omp/multi-omp` | data dir; nodes live in `$HOME/nodes.json` |
 
+## Docker
+
+```sh
+docker compose -f docker-compose.example.yaml up -d        # builds ./Dockerfile
+```
+
+or deploy `portainer-stack.example.yml` as a Portainer stack (build the
+image first: `docker build -t multi-omp:latest .`). Both examples expose
+`30140` (dashboard) and `30200-30299` (per-node listeners) and persist the
+registry in a `data/` volume. Node URLs must be reachable from inside the
+container — `host.docker.internal` (see `extra_hosts`) or the node's LAN IP.
+
 ## API
 
 | Method & path | Result |
