@@ -82,9 +82,9 @@ export function parseNodeId(segment: string): string | null {
 /** Basic-auth header for a node, or undefined when the node has no password. */
 export function authHeadersFor(node: OmpNode): Record<string, string> | undefined {
   if (node.password !== undefined && node.password !== "") {
-    return {
-      Authorization: `Basic ${btoa(`${node.username ?? "omp"}:${node.password}`)}`,
-    };
+    const raw = `${node.username ?? "omp"}:${node.password}`;
+    const b64 = Buffer.from(raw, "utf8").toString("base64");
+    return { Authorization: `Basic ${b64}` };
   }
   return undefined;
 }

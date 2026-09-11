@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createGateway } from "../src/gateway";
+import { createGateway, type Gateway } from "../src/gateway";
 import { MemoryNodeStore } from "../src/store";
 import { checkNode } from "../src/upstream";
 import { startMockUpstream, type MockUpstream } from "./helpers/mock-upstream";
@@ -7,7 +7,7 @@ import { startMockUpstream, type MockUpstream } from "./helpers/mock-upstream";
 describe("gateway", () => {
   let mock: MockUpstream;
   let store: MemoryNodeStore;
-  let gw: ReturnType<typeof createGateway>;
+  let gw: Gateway;
   let nodePort: number;
 
   beforeAll(async () => {
@@ -150,5 +150,90 @@ describe("gateway", () => {
 
   test("gateway 404s unknown top-level routes", async () => {
     expect((await gw.handle(new Request("http://gw/unknown"))).status).toBe(404);
+  });
+  test("GET /api/nodes lists nodes without passwords", async () => {
+    const res = await gw.handle(new Request("http://gw/api/nodes"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nodes: Record<string, unknown>[] };
+    expect(body.nodes).toHaveLength(1);
+    expect(body.nodes[0].id).toBe("rasp");
+    expect(body.nodes[0].password).toBeUndefined();
+    expect(body.nodes[0].hasPassword).toBe(true);
+  });
+
+  test("invalid id segment -> 400", async () => {
+    expect((await gw.handle(new Request("http://gw/api/nodes/BAD_ID"))).status).toBe(400);
+    expect((await gw.handle(new Request("http://gw/api/nodes/-bad"))).status).toBe(400);
+  });
+
+  test("PATCH url change takes effect without restart (listener keeps its port)", async () => {
+    const before = mock.requests.length;
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: mock.url }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(store.get("rasp")?.port).toBe(nodePort);
+    const html = await (await fetch(`http://127.0.0.1:${nodePort}/`)).text();
+    expect(html).toContain("MOCK APP");
+    expect(mock.requests.slice(before).every((r) => r.host === `127.0.0.1:${mock.port}`)).toBe(true);
+  });
+
+  test("PATCH credential change takes effect immediately", async () => {
+    const before = mock.requests.length;
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "omp", password: "mock-pass" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${nodePort}/`)).status).toBe(200);
+    expect(mock.requests[before + 1]?.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
+  });
+
+  test("PATCH password:null clears credentials", async () => {
+    mock.setLocked(false);
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: null }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { node: { hasPassword: boolean } }).node.hasPassword).toBe(false);
+    expect(store.get("rasp")?.password).toBeUndefined();
+    const before = mock.requests.length;
+    expect((await fetch(`http://127.0.0.1:${nodePort}/`)).status).toBe(200);
+    expect(mock.requests[before]?.auth).toBe(null);
+    // restore locked state + password for subsequent tests
+    const restore = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "mock-pass" }),
+      }),
+    );
+    expect(restore.status).toBe(200);
+    mock.setLocked(true);
+  });
+
+  test("PATCH username:null clears username (defaults to omp)", async () => {
+    const before = mock.requests.length;
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: null }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${nodePort}/`)).status).toBe(200);
+    expect(mock.requests[before + 1]?.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
   });
 });

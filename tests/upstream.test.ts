@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { checkNode } from "../src/upstream";
+import { buildUpstreamHeaders, checkNode } from "../src/upstream";
 import { startMockUpstream, type MockUpstream } from "./helpers/mock-upstream";
 
 describe("checkNode", () => {
@@ -63,5 +63,17 @@ describe("checkNode", () => {
     } finally {
       mock.setLocked(false);
     }
+  });
+});
+
+describe("buildUpstreamHeaders", () => {
+  test("encodes non-Latin1 passwords as UTF-8", () => {
+    const h = buildUpstreamHeaders(new Request("http://gw/"), {
+      id: "x",
+      name: "x",
+      url: "http://h:1",
+      password: "pässwörd",
+    });
+    expect(h["authorization"]).toBe(`Basic ${Buffer.from("omp:pässwörd", "utf8").toString("base64")}`);
   });
 });

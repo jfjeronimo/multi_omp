@@ -80,7 +80,7 @@ Each node gets a local port from `30200–30299` (shown in the dashboard's
 | `GET /api/nodes` | `{ nodes: [...] }` (no passwords; `hasPassword` flag) |
 | `GET /api/nodes/:id` | `{ node, status }` |
 | `POST /api/nodes` | create `{ name, url, username?, password?, note? }` → `201 { node, status }` |
-| `PATCH /api/nodes/:id` | partial update; changing `url` restarts the proxy listener |
+| `PATCH /api/nodes/:id` | partial update; `url`/credential changes take effect immediately (no restart). Send `password` or `username` as `null` to clear |
 | `DELETE /api/nodes/:id` | remove node and stop its listener |
 
 ## Security

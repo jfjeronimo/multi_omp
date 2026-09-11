@@ -83,6 +83,18 @@ describe("proxyRequest", () => {
       restore();
     }
   });
+
+  test("forwards set-cookie headers", async () => {
+    const restore = mockFetch(async () =>
+      new Response("ok", { headers: { "set-cookie": "sid=abc; Path=/; HttpOnly" } }),
+    );
+    try {
+      const res = await proxyRequest(new Request("http://gw/session"), node);
+      expect(res.headers.get("set-cookie")).toBe("sid=abc; Path=/; HttpOnly");
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe("filterResponseHeaders", () => {

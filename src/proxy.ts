@@ -23,7 +23,6 @@ const SKIP_RESPONSE_HEADERS: Record<string, true> = {
   "transfer-encoding": true,
   "content-encoding": true,
   "content-length": true,
-  "set-cookie": true,
 };
 
 /** Response headers minus hop-by-hop and framing headers. */

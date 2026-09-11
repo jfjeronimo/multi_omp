@@ -13,6 +13,7 @@
  */
 
 import type { NodeStore, OmpNode } from "./store";
+import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest } from "./proxy";
 import { FIRST_NODE_PORT, LAST_NODE_PORT, probePortFree, rangePorts } from "./ports";
@@ -88,15 +89,24 @@ export function createGateway(opts: GatewayOptions): Gateway {
   function startNodeServer(node: OmpNode): NodeListener {
     const nodePort = pickPort(node);
     if (nodePort === null) throw new Error(`No free local port in range ${portRange.first}-${portRange.last}`);
+    // The handler re-reads the node from the store on every request, so a
+    // url/credential PATCH takes effect immediately without a restart.
     const server = Bun.serve({
       port: nodePort,
       hostname,
       fetch: async (req) => {
+        const current = opts.store.get(node.id);
+        if (!current) {
+          return new Response(JSON.stringify({ error: `node "${node.id}" no longer exists` }), {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          });
+        }
         try {
-          return await proxyRequest(req, node);
+          return await proxyRequest(req, current);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          return new Response(JSON.stringify({ error: `proxy to ${node.id} failed: ${msg}` }), {
+          return new Response(JSON.stringify({ error: `proxy to ${current.id} failed: ${msg}` }), {
             status: 502,
             headers: { "content-type": "application/json" },
           });
@@ -116,9 +126,20 @@ export function createGateway(opts: GatewayOptions): Gateway {
     }
   }
 
+  /**
+   * Start (or move) the listener for `node`. Only a port change requires a
+   * restart: url/credential changes are picked up per-request by the fresh
+   * store read inside the fetch handler.
+   */
   function ensureNodeServer(node: OmpNode): NodeListener {
     const existing = listeners.get(node.id);
     if (existing && existing.server.port === node.port) return existing;
+    stopNodeServer(node.id);
+    return startNodeServer(node);
+  }
+
+  /** Restart a listener so url/credential/port changes take effect now. */
+  function restartNodeServer(node: OmpNode): NodeListener {
     stopNodeServer(node.id);
     return startNodeServer(node);
   }
@@ -143,13 +164,25 @@ export function createGateway(opts: GatewayOptions): Gateway {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
+
+  /**
+   * Allocate a port, persist it on the node record, and bind the listener —
+   * as one transaction: if the bind fails, the port is not left persisted
+   * on a dead node record.
+   */
   async function addNode(
     input: Omit<OmpNode, "id"> & { id?: string },
   ): Promise<{ node: OmpNode; status: NodeStatus }> {
     const nodePort = pickPort({ ...input, id: input.id ?? "" } as OmpNode);
     if (nodePort === null) throw new Error(`No free local port in range ${portRange.first}-${portRange.last}`);
-    const node = opts.store.add({ ...input, id: input.id ?? "", port: nodePort } as OmpNode);
-    ensureNodeServer(node);
+    const id = input.id ?? slugify(input.name || input.url, new Set(opts.store.list().map((n) => n.id)));
+    const node = opts.store.add({ ...input, id, port: nodePort } as OmpNode);
+    try {
+      ensureNodeServer(node);
+    } catch (e) {
+      opts.store.remove(id);
+      throw e;
+    }
     return withStatus(node);
   }
 
@@ -158,7 +191,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     patch: Partial<OmpNode>,
   ): Promise<{ node: OmpNode; status: NodeStatus }> {
     const updated = opts.store.update(id, patch);
-    if (patch.url !== undefined) ensureNodeServer(updated);
+    restartNodeServer(updated);
     return withStatus(updated);
   }
 
@@ -175,10 +208,17 @@ export function createGateway(opts: GatewayOptions): Gateway {
       const statuses = await Promise.all(
         opts.store.list().map(async (n) => ({ id: n.id, status: await statusOf(n) })),
       );
-      return new Response(JSON.stringify({ nodes: statuses }), {
+      return new Response(JSON.stringify({ statuses }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
+    }
+
+    if (path === "/api/nodes" && method === "GET") {
+      return new Response(
+        JSON.stringify({ nodes: opts.store.list().map(publicNode) }),
+        { headers: { "content-type": "application/json" } },
+      );
     }
 
     if (path === "/api/nodes" && method === "POST") {
@@ -221,10 +261,15 @@ export function createGateway(opts: GatewayOptions): Gateway {
         });
       }
     }
-
     const m = path.match(/^\/api\/nodes\/([^/]+)$/);
     if (m) {
       const id = decodeURIComponent(m[1]);
+      if (parseNodeId(id) === null) {
+        return new Response(JSON.stringify({ error: `Invalid node id "${id}"` }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
       const node = opts.store.get(id);
       if (!node) {
         return new Response(JSON.stringify({ error: `Unknown node "${id}"` }), {
@@ -254,7 +299,10 @@ export function createGateway(opts: GatewayOptions): Gateway {
         if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
         if (typeof body.url === "string" && body.url) patch.url = body.url;
         if (typeof body.note === "string") patch.note = body.note;
-        if (typeof body.password === "string" && body.password) patch.password = body.password;
+        if (body.password === null) patch.password = undefined;
+        else if (typeof body.password === "string") patch.password = body.password;
+        if (body.username === null) patch.username = undefined;
+        else if (typeof body.username === "string") patch.username = body.username;
         try {
           const { node: updated, status } = await updateNode(id, patch);
           return new Response(JSON.stringify({ node: publicNode(updated), status }), {
@@ -298,12 +346,19 @@ export function createGateway(opts: GatewayOptions): Gateway {
 
   const server = Bun.serve({ port, hostname, fetch: handler });
 
-  // Boot listeners for nodes that were already in the store.
+  // Boot listeners for nodes that were already in the store. A node whose
+  // saved port is now held by the OS is re-assigned to a free one.
   for (const node of opts.store.list()) {
     try {
       ensureNodeServer(node);
-    } catch (e) {
-      console.error(`multi-omp: could not start proxy for node ${node.id}: ${(e as Error).message}`);
+    } catch {
+      const fresh = { ...node, port: undefined };
+      try {
+        opts.store.update(node.id, { port: undefined });
+        ensureNodeServer(fresh);
+      } catch (e) {
+        console.error(`multi-omp: could not start proxy for node ${node.id}: ${(e as Error).message}`);
+      }
     }
   }
 

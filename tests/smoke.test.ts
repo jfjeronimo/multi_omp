@@ -8,7 +8,7 @@
  * asset paths resolve natively.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createGateway } from "../src/gateway";
+import { createGateway, type Gateway } from "../src/gateway";
 import { MemoryNodeStore } from "../src/store";
 import { checkNode } from "../src/upstream";
 
@@ -17,7 +17,7 @@ const NODE_PORT = 30600;
 
 describe("smoke: real omp-web", () => {
   let store: MemoryNodeStore;
-  let gw: ReturnType<typeof createGateway>;
+  let gw: Gateway;
   let skipped = false;
 
   beforeAll(async () => {
