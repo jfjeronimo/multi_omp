@@ -2,10 +2,10 @@
  * multi-omp entrypoint: dashboard + control plane on :30140 by default, plus
  * one transparent reverse-proxy listener per node on its own local port.
  *
- * Env:
  *   PORT / MULTI_OMP_PORT        gateway port (default 30140)
  *   HOSTNAME / MULTI_OMP_HOST    gateway bind (default 127.0.0.1)
  *   MULTI_OMP_HOME               data dir (default ~/.omp/multi-omp)
+ *   MULTI_OMP_NOTIFIER_MS        Telegram notifier poll ms (default 10000; 0 = off)
  */
 
 import { FileNodeStore } from "./store";
@@ -19,6 +19,7 @@ const gateway = createGateway({
   store,
   port: Number(process.env.MULTI_OMP_PORT ?? process.env.PORT ?? 30140),
   hostname,
+  notifierIntervalMs: Number(process.env.MULTI_OMP_NOTIFIER_MS || 10_000),
 });
 
 console.log(`multi-omp dashboard on http://${gateway.server.hostname}:${gateway.server.port}`);

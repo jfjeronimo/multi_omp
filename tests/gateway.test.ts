@@ -23,6 +23,7 @@ describe("gateway", () => {
       port: 0,
       hostname: "127.0.0.1",
       statusOf: checkNode,
+      notifierIntervalMs: 0,
       portRange: { first: 30200, last: 30299 },
     });
   });
@@ -87,6 +88,11 @@ describe("gateway", () => {
     expect(body.node.port).toBeGreaterThanOrEqual(30200);
     expect(body.node.port).toBeLessThanOrEqual(30299);
     expect(store.get("pi")).toBeDefined();
+    // The allocated port is persisted on the record, so GET /api/nodes/:id
+    // (and the switcher bar) can reach the node's proxy origin.
+    const oneRes = await gw.handle(new Request("http://gw/api/nodes/pi"));
+    const one = (await oneRes.json()) as { node: { port: number } };
+    expect(one.node.port).toBe(body.node.port);
   });
 
   test("POST /api/nodes validates input", async () => {
@@ -122,13 +128,17 @@ describe("gateway", () => {
     expect(store.get("pi")).toBeUndefined();
   });
 
-  test("node listener proxies HTML unmodified (no base/overlay)", async () => {
+  test("node listener injects the switcher bar into root HTML only", async () => {
     const res = await fetch(`http://127.0.0.1:${nodePort}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("MOCK APP");
-    // The whole point of the port model: no prefix rewriting, no base tag, no overlay.
+    // The bar is appended before </body>; the app itself is unmodified.
+    expect(html).toContain('id="momo-bar"');
+    expect(html).toContain('var ME = "rasp";');
+    expect(html.indexOf("MOCK APP")).toBeLessThan(html.indexOf('id="momo-bar"'));
+    // Still no prefix rewriting / base tag / dashboard overlay.
     expect(html).not.toContain("<base");
     expect(html).not.toContain("multi-omp-overlay");
     const last = mock.requests[mock.requests.length - 1];
@@ -141,6 +151,13 @@ describe("gateway", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/javascript");
     expect(await res.text()).toBe("console.log('main')");
+    expect(await (await fetch(`http://127.0.0.1:${nodePort}/_next/static/chunks/main.js`)).text()).not.toContain("momo-bar");
+  });
+
+  test("node listener leaves api and sse responses bar-free", async () => {
+    expect((await (await fetch(`http://127.0.0.1:${nodePort}/api/sessions`)).text()).includes("momo-bar")).toBe(false);
+    const sse = await (await fetch(`http://127.0.0.1:${nodePort}/api/agent/1/events`)).text();
+    expect(sse).not.toContain("momo-bar");
   });
 
   test("node listener proxies JSON api", async () => {

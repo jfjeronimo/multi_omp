@@ -22,7 +22,9 @@ browser ──► http://<gw-host>:30140/          dashboard + control plane
 - **`src/proxy.ts`** — transparent reverse proxy. Forwards path+query+method+
   body as-is to the node origin; rewrites only the `Host` header (omp-web
   validates it) and injects Basic auth from the local store. Response streams
-  back unchanged (SSE included). **No HTML is inspected or rewritten.**
+  back unchanged (SSE included). The only rewrite: the node-switcher bar is
+  appended to the root HTML document (see below) — API, SSE and asset
+  responses pass through byte-for-byte.
 - **`src/store.ts`** — node registry. `FileNodeStore` persists to
   `nodes.json` (`0600`) under `MULTI_OMP_HOME`; `MemoryNodeStore` for tests.
 - **`src/ports.ts`** — per-node port allocation from `30200–30299`. Ports are
@@ -31,6 +33,11 @@ browser ──► http://<gw-host>:30140/          dashboard + control plane
 - **`src/upstream.ts`** — health checks: `200` = ok, `401` = ok+locked,
   `403` = host not allowed, anything else / timeout = down.
 - **`src/dashboard.ts`** — single template string + vanilla JS. No framework.
+- **`src/telegram.ts`** — per-node Telegram notifier: polls each node's
+  omp-web session API and sends a message when a tracked session finishes a
+  turn, waits for input, or resumes (each transition once, until the session
+  leaves that state). Nodes opt in with a bot token + chat id (set in the
+  dashboard node form); the token never leaves the gateway.
 
 ### Why per-node ports (and not a single-origin proxy)
 
@@ -43,6 +50,24 @@ streamed JS chunks, which is fragile and breaks on every omp-web release.
 Serving each node at the **root of its own port** means every absolute path
 (`/_next/...`, `/api/...`, `/recover`) resolves natively: zero rewriting,
 zero coupling to omp-web's internals.
+
+### Node-switcher bar
+
+Every proxied node page carries a thin fixed bar at the top (injected into
+the root HTML document only — API, SSE and asset responses are untouched):
+
+- **Node select** — lists all registered nodes with the current one marked
+  `▸`; choosing another navigates the browser to that node's local proxy
+  origin, so switching nodes is a full page load of the other node.
+- **Status dot** — green (up), yellow (up, locked), red (down) for the
+  current node, live from `GET /api/health`; down/locked nodes are labeled
+  in the select.
+- **Live metrics** — running job count and an "awaiting you" marker when the
+  node's agent is waiting on your input (pink dot).
+- **Hide button** — hides the bar for this browser only (`localStorage`).
+
+The bar reuses omp-web's dark theme tokens and has no external dependencies.
+
 
 ## Quick start
 
@@ -61,15 +86,18 @@ curl -X POST http://127.0.0.1:30140/api/nodes \
 ```
 
 Each node gets a local port from `30200–30299` (shown in the dashboard's
-"Local" column) and stays on that port across restarts.
+"Local" column) and stays on that port across restarts. If a saved port is
+held by the OS at boot (previous crash, another process), the gateway keeps
+retrying it for 15s and then re-assigns a free one, persisting the new port
+so it is stable from then on.
 
 ## Configuration (env)
 
 | Var | Default | Meaning |
-|---|---|---|
+| `MULTI_OMP_HOME` | `~/.omp/multi-omp` | data dir; nodes live in `$HOME/nodes.json` |
+| `MULTI_OMP_NOTIFIER_MS` | `10000` | Telegram notifier poll interval; `0` disables it |
 | `MULTI_OMP_PORT` (or `PORT`) | `30140` | gateway/control-plane port |
 | `MULTI_OMP_HOST` (or `HOSTNAME_BIND`) | `127.0.0.1` | bind address |
-| `MULTI_OMP_HOME` | `~/.omp/multi-omp` | data dir; nodes live in `$HOME/nodes.json` |
 
 ## Docker
 
@@ -109,9 +137,11 @@ container — `host.docker.internal` (see `extra_hosts`) or the node's LAN IP.
 
 ## Future compatibility
 
-The proxy is deliberately opaque: it forwards bytes and never parses HTML,
-JS or routes. A new omp-web version (new chunks, new routes, markup changes)
-is served unchanged. The only contract multi-omp relies on:
+The proxy is deliberately near-opaque: it forwards bytes and never parses
+JS or routes. The single documented rewrite is appending the node-switcher
+bar to the root HTML document (a string append before `</body>`, no parsing).
+A new omp-web version (new chunks, new routes, markup changes) is served
+unchanged. The only contract multi-omp relies on:
 
 1. omp-web listens on the configured host:port and answers `GET /` (for
    health checks).
