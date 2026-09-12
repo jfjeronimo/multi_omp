@@ -196,6 +196,9 @@ export function createGateway(opts: GatewayOptions): Gateway {
         }
       },
     }), nodePort);
+    // If the port was fresh (not saved), persist it so the node record — and
+    // therefore GET /api/nodes/:id — reflects the actual proxy port.
+    if (node.port !== nodePort) opts.store.update(node.id, { port: nodePort });
     const listener: NodeListener = { id: node.id, server };
     listeners.set(node.id, listener);
     return listener;

@@ -13,6 +13,7 @@ export interface DashboardNode {
   port?: number;
   hasPassword: boolean;
   note?: string;
+  hasTelegram?: boolean;
   status?: { ok: boolean; locked?: boolean; latencyMs?: number; error?: string };
 }
 
@@ -37,8 +38,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       <tr data-id="${esc(n.id)}">
         <td><a class="open" href="${esc(nodeUrl(n))}" target="_blank" rel="noopener"><span class="dot ${dot}"></span>${esc(n.name)}</a></td>
         <td class="url">${esc(n.url)}</td>
-        <td class="local">${esc(nodeUrl(n))}</td>
-        <td><span class="badge">${label}</span>${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
+        <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg">tg</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
         <td class="actions">
           <button data-act="edit" data-id="${esc(n.id)}">edit</button>
           <button data-act="remove" data-id="${esc(n.id)}">remove</button>
@@ -75,7 +75,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
   .url { color:#5c6370; }
   .local { color:#5c6370; font-size:.78rem; }
   .badge { font-size:.75rem; padding:.1rem .45rem; border-radius:4px; background:#1d2127; border:1px solid #2a2e35; }
-  .note { color:#5c6370; font-size:.78rem; }
+  .badge.tg { color:#7aa2f7; border-color:#2a3550; }
   button { background:#1a1d22; color:#e6e8ea; border:1px solid #2a2e35; border-radius:6px;
            padding:.25rem .6rem; font:inherit; font-size:.8rem; cursor:pointer; }
   button:hover { border-color:#7aa2f7; color:#7aa2f7; }
@@ -134,6 +134,8 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     <div><label for="e-url">URL</label><input id="e-url" required></div>
     <div><label for="e-pass">New password (leave blank to keep)</label><input id="e-pass" type="password"></div>
     <div><label for="e-note">Note</label><input id="e-note"></div>
+    <div><label for="e-tgtok">Telegram bot token (blank = keep)</label><input id="e-tgtok" type="password" placeholder="123456:ABC-…"></div>
+    <div><label for="e-tgchat">Telegram chat/channel id (blank = keep)</label><input id="e-tgchat" placeholder="@channel or -100123…"></div>
     <div class="row">
       <button type="button" id="e-cancel">cancel</button>
       <button type="submit">save</button>
@@ -186,6 +188,8 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       $("#e-url").value = tr.querySelector(".url").textContent.trim();
       $("#e-note").value = tr.querySelector(".note") ? tr.querySelector(".note").textContent : "";
       $("#e-pass").value = "";
+      $("#e-tgtok").value = "";
+      $("#e-tgchat").value = "";
       dlg.showModal();
     }
   });
@@ -200,6 +204,8 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
         url: $("#e-url").value,
         password: $("#e-pass").value || undefined,
         note: $("#e-note").value || undefined,
+        telegramToken: $("#e-tgtok").value || undefined,
+        telegramChatId: $("#e-tgchat").value || undefined,
       }, "PATCH");
       location.reload();
     } catch (e2) { err.textContent = e2.message; }
@@ -208,6 +214,129 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
 </script>
 </body>
 </html>`;
+}
+
+/**
+ * Overlay bar injected into every omp-web HTML document served through a
+ * node port. Lets the user switch between the gateway's nodes from inside a
+ * node, and shows the current node's status + live metrics (jobs running,
+ * sessions waiting on the user). Self-contained (inline style + script, no
+ * external assets) and reuses omp-web's visual tokens so it reads as part of
+ * the app.
+ *
+ * `gwOrigin` is the control-plane origin (e.g. `http://10.0.0.5:30140`) the
+ * bar fetches cross-origin (CORS is enabled on the /api routes). The gateway
+ * serves each node at the root of its own port on the same host, so the bar
+ * only needs the gateway origin plus the selected node's port to build the
+ * destination URL. `currentId` marks which node this page belongs to.
+ */
+export function renderNodeBar(gwOrigin: string, currentId: string): string {
+  return `
+<style id="momo-bar-css">
+#momo-bar{position:fixed;top:0;left:0;right:0;z-index:2147483647;display:flex;align-items:center;gap:.6rem;
+  padding:.3rem .7rem;background:#14161af2;border-bottom:1px solid #23272e;
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#e6e8ea}
+#momo-bar .momo-title{color:#7aa2f7;font-weight:600;letter-spacing:.02em}
+#momo-bar select{background:#1a1d22;color:#e6e8ea;border:1px solid #2a2e35;border-radius:5px;
+  font:inherit;padding:.15rem .35rem;max-width:16rem}
+#momo-bar select:focus{outline:none;border-color:#7aa2f7}
+#momo-bar .momo-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+#momo-bar .momo-dot.ok{background:#4ade80}
+#momo-bar .momo-dot.lock{background:#facc15}
+#momo-bar .momo-dot.down{background:#f87171}
+#momo-bar .momo-dot.wait{background:#f472b6}
+#momo-bar .momo-metrics{color:#a8adb4;margin-left:auto;display:flex;gap:.9rem;white-space:nowrap}
+#momo-bar .momo-metrics b{color:#e6e8ea;font-weight:600}
+#momo-bar .momo-wait{color:#f472b6}
+#momo-bar .momo-x{color:#5c6370;cursor:pointer;border:none;background:none;font:inherit;padding:0 .1rem}
+#momo-bar .momo-x:hover{color:#e6e8ea}
+body.momo-bar-on{padding-top:2.1rem!important}
+body.momo-bar-hidden{padding-top:0!important}
+</style>
+<div id="momo-bar">
+  <span class="momo-dot down" id="momo-dot"></span>
+  <span class="momo-title">multi-omp</span>
+  <select id="momo-select" aria-label="Switch node"></select>
+  <span class="momo-metrics" id="momo-metrics"></span>
+  <button class="momo-x" id="momo-x" title="Hide bar (this device)">–</button>
+</div>
+<script>
+(function () {
+  var GW = ${JSON.stringify(gwOrigin)};
+  var ME = ${JSON.stringify(currentId)};
+  var bar = document.getElementById("momo-bar");
+  var sel = document.getElementById("momo-select");
+  var dot = document.getElementById("momo-dot");
+  var met = document.getElementById("momo-metrics");
+  if (localStorage.getItem("momo-bar-hidden") === "1") {
+    bar.style.display = "none";
+    document.body.classList.add("momo-bar-hidden");
+  }
+  document.getElementById("momo-x").addEventListener("click", function () {
+    localStorage.setItem("momo-bar-hidden", "1");
+    bar.style.display = "none";
+    document.body.classList.add("momo-bar-hidden");
+  });
+  document.body.classList.add("momo-bar-on");
+  function refresh() {
+    // /api/nodes has no per-node status; /api/health returns one per id.
+    // Merge both so the dot + "(down)"/"(locked)" labels reflect reality.
+    return Promise.all([
+      fetch(GW + "/api/nodes").then(function (r) { return r.json(); }),
+      fetch(GW + "/api/health").then(function (r) { return r.json(); }).catch(function () { return { statuses: [] }; }),
+    ]).then(function (res) {
+      var nodes = (res[0] && res[0].nodes) || [];
+      var byStatus = {};
+      var list = (res[1] && res[1].statuses) || [];
+      for (var h = 0; h < list.length; h++) byStatus[list[h].id] = list[h].status;
+      sel.innerHTML = "";
+      var me = null;
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        n.status = byStatus[n.id];
+        var opt = document.createElement("option");
+        opt.value = n.id;
+        var label = n.name;
+        if (n.status && !n.status.ok) label += " (down)";
+        else if (n.status && n.status.locked) label += " (locked)";
+        if (n.id === ME) label = "▸ " + label;
+        opt.textContent = label;
+        if (n.id === ME) { me = n; opt.selected = true; }
+        sel.appendChild(opt);
+      }
+      var st = me ? me.status : null;
+      dot.className = "momo-dot " + (st ? (st.ok ? (st.locked ? "lock" : "ok") : "down") : "down");
+      fetch(GW + "/api/nodes/" + encodeURIComponent(ME) + "/metrics")
+        .then(function (r) { return r.json(); })
+        .then(function (m) {
+          var html = "";
+          if (typeof m.running === "number" && m.running > 0) html += '<span>jobs <b>' + m.running + '</b></span>';
+          if (typeof m.waiting === "number" && m.waiting > 0) {
+            html += '<span class="momo-wait">awaiting you</span>';
+            dot.className = "momo-dot wait";
+          }
+          met.innerHTML = html;
+        })
+        .catch(function () { met.innerHTML = ""; });
+    }).catch(function () {
+      dot.className = "momo-dot down";
+      met.innerHTML = "";
+    });
+  }
+  sel.addEventListener("change", function () {
+    var id = sel.value;
+    fetch(GW + "/api/nodes/" + encodeURIComponent(id))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var port = d.node && d.node.port;
+        if (port) location.href = GW.replace(/:[0-9]+$/, ":" + port) + "/";
+      })
+      .catch(function () {});
+  });
+  refresh();
+  setInterval(refresh, 15000);
+})();
+</script>`;
 }
 
 function esc(s: string): string {

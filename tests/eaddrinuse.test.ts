@@ -106,9 +106,10 @@ describe("EADDRINUSE recovery", () => {
       portRange: { first: 30200, last: 30299 },
     });
     servers.push(gw.server);
-    // No longer needed: the boot loop already fell back.
-    holder.kill();
 
+    // The holder keeps the saved port held for the full 100s, well past the
+    // 15s retry window, so the boot loop MUST give up and re-assign a new
+    // port. afterAll kills it.
     const updated = store.get("n2");
     expect(updated?.port).not.toBeUndefined();
     expect(updated?.port).not.toBe(occupied);
