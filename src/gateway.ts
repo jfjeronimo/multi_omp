@@ -15,7 +15,7 @@ import type { NodeStore, OmpNode } from "./store";
 import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest, filterResponseHeaders } from "./proxy";
-import { probePortFree, rangePorts } from "./ports";
+import { diagnosePortHeld, probePortFree, rangePorts } from "./ports";
 import { renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
 import {
   createSessionNotifier,
@@ -482,7 +482,16 @@ export function createGateway(opts: GatewayOptions): Gateway {
     });
   };
 
-  const server = bindWithRetry((p) => Bun.serve({ port: p, hostname, fetch: handler }), port);
+  let server: Server;
+  try {
+    server = bindWithRetry((p) => Bun.serve({ port: p, hostname, fetch: handler }), port);
+  } catch (e) {
+    // The dashboard must live on its configured port: never re-assign. Print a
+    // diagnosis of who is holding the port before the process exits.
+    console.error(`multi-omp: control plane could not bind port ${port} after 15s of retries; the port is held by another process`);
+    console.error(diagnosePortHeld(port, hostname));
+    throw e;
+  }
 
   // Boot listeners for nodes that were already in the store. A node whose
   // saved port is now held by the OS is re-assigned to a free one.
