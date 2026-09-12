@@ -6,7 +6,7 @@
 # Environment variables (all optional, defaults shown):
 #   MULTI_OMP_PORT      30140   gateway/dashboard port
 #   MULTI_OMP_HOST      0.0.0.0 bind address (0.0.0.0 inside a container)
-#   MULTI_OMP_HOME      /data   data dir holding nodes.json
+#                           — always an IP, never a hostname/FQDN
 ---
 services:
   multi-omp:
@@ -18,10 +18,15 @@ services:
       - "30200-30299:30200-30299"
     environment:
       MULTI_OMP_PORT: "30140"
+      # Bind 0.0.0.0 so the dashboard is reachable from outside the container.
+      # MULTI_OMP_HOST takes precedence over HOSTNAME_BIND: never let a machine
+      # FQDN reach the bind target (resolves to an IP the port-forward owns).
       MULTI_OMP_HOST: "0.0.0.0"
       MULTI_OMP_HOME: /data
     volumes:
       - multi-omp-data:/data
+      # Host FQDN readable inside the container as /etc/hostname (read-only).
+      - /etc/hostname:/etc/hostname:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

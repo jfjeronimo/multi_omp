@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
 import { createGateway, type Gateway } from "../src/gateway";
+import { resolveBindHost } from "../src/ports";
 import { MemoryNodeStore } from "../src/store";
 import { checkNode } from "../src/upstream";
 import { startMockUpstream, type MockUpstream } from "./helpers/mock-upstream";
@@ -18,7 +21,7 @@ describe("gateway", () => {
     // Pre-allocate a fixed port so the test can hit the node listener directly.
     store.add({ id: "rasp", name: "Raspberry", url: mock.url, password: "mock-pass", port: 30500 });
     nodePort = 30500;
-    gw = createGateway({
+    gw = await createGateway({
       store,
       port: 0,
       hostname: "127.0.0.1",
@@ -286,7 +289,7 @@ describe("gateway", () => {
     const gwPort = 30900;
     const store2 = new MemoryNodeStore();
     store2.add({ id: "collide", name: "Collide", url: mock2.url, port: gwPort });
-    const gw2 = createGateway({
+    const gw2 = await createGateway({
       store: store2,
       port: gwPort,
       hostname: "127.0.0.1",
@@ -318,7 +321,7 @@ describe("gateway", () => {
     // self-heal are the load-bearing fix, covered by the test above.)
     const gwPort = 30950;
     const store3 = new MemoryNodeStore();
-    const gw3 = createGateway({
+    const gw3 = await createGateway({
       store: store3,
       port: gwPort,
       hostname: "127.0.0.1",
@@ -341,6 +344,91 @@ describe("gateway", () => {
       expect(body.node.port).toBeLessThanOrEqual(30960);
     } finally {
       gw3.stop();
+    }
+  });
+
+  test("hostname bind target resolves to an IP and serves (no EADDRINUSE)", async () => {
+    // Regression: a deployment can pass the machine FQDN (e.g. via
+    // HOSTNAME_BIND) as the bind host. Bun.serve with a bare hostname
+    // resolves it to the machine's bridge IP — an address the Docker
+    // port-forward already owns — and the kernel rejects the bind with
+    // EADDRINUSE while no socket appears in /proc. The gateway must
+    // resolve the name to an IP literal up front and bind that instead.
+    //
+    // To exercise the FQDN path in every environment (bare hostnames in
+    // Docker/CI have no dot, so os.hostname() is useless there), register
+    // a synthetic name in /etc/hosts when writable; otherwise fall back to
+    // a dotted os.hostname(); otherwise skip.
+    const SYNTHETIC = "multi-omp-regression.invalid";
+    const entry = `127.0.0.1\t${SYNTHETIC}`;
+    let hostsEdited = false;
+    let host = "";
+    try {
+      try {
+        fs.appendFileSync("/etc/hosts", `\n${entry}\n`);
+        hostsEdited = true;
+      } catch {
+        hostsEdited = false;
+      }
+      const candidate = hostsEdited ? SYNTHETIC : os.hostname();
+      if (candidate.includes(".")) {
+        const addrs = await Bun.dns.lookup(candidate);
+        if (addrs.length > 0) host = candidate;
+      }
+    } catch {
+      host = "";
+    }
+    if (!host) {
+      if (hostsEdited) {
+        try {
+          const contents = fs.readFileSync("/etc/hosts", "utf8");
+          fs.writeFileSync(
+            "/etc/hosts",
+            contents.split("\n").filter((l) => l.trim() !== entry).join("\n"),
+          );
+          hostsEdited = false;
+        } catch {
+          // best-effort; leave the entry
+        }
+      }
+      console.log(
+        "[gateway] skipping hostname regression test: no writable /etc/hosts and no dotted hostname",
+      );
+      return;
+    }
+    try {
+      const gwHost = await resolveBindHost(host);
+      const store4 = new MemoryNodeStore();
+      const gw4 = await createGateway({
+        store: store4,
+        port: 30970,
+        hostname: host,
+        statusOf: checkNode,
+        notifierIntervalMs: 0,
+        portRange: { first: 30940, last: 30960 },
+      });
+      try {
+        // Bound to the resolved IP, not the bare name.
+        expect(gw4.server.hostname).toBe(gwHost);
+        const res = await fetch(`http://${gwHost}:30970/api/health`);
+        expect(res.status).toBe(200);
+      } finally {
+        gw4.stop();
+      }
+    } finally {
+      if (hostsEdited) {
+        // Remove the synthetic entry so repeated runs and concurrent suites
+        // do not stack duplicates in /etc/hosts.
+        try {
+          const contents = fs.readFileSync("/etc/hosts", "utf8");
+          fs.writeFileSync(
+            "/etc/hosts",
+            contents.split("\n").filter((l) => l.trim() !== entry).join("\n"),
+          );
+        } catch {
+          // best-effort; do not fail the test over cleanup
+        }
+      }
     }
   });
 });

@@ -15,7 +15,7 @@ import type { NodeStore, OmpNode } from "./store";
 import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest, filterResponseHeaders } from "./proxy";
-import { diagnosePortHeld, probePortFree, rangePorts } from "./ports";
+import { diagnosePortHeld, probePortFree, rangePorts, resolveBindHost } from "./ports";
 import { renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
 import {
   createSessionNotifier,
@@ -81,9 +81,14 @@ export interface GatewayOptions {
   ) => SessionNotifier;
 }
 
-export function createGateway(opts: GatewayOptions): Gateway {
+export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
   const port = opts.port ?? 30140;
-  const hostname = opts.hostname ?? "127.0.0.1";
+  const rawHost = opts.hostname ?? "127.0.0.1";
+  // A hostname (e.g. the machine FQDN from HOSTNAME_BIND) must never reach
+  // Bun.serve: the runtime resolves it to the machine's bridge IP, an
+  // address the Docker port-forward already owns → EADDRINUSE with no
+  // visible socket in /proc. Resolve to an IP literal up front instead.
+  const hostname = await resolveBindHost(rawHost);
   const version = opts.version ?? "0.1.0";
   const statusOf = opts.statusOf ?? checkNode;
   const portRange = opts.portRange ?? { first: 30200, last: 30299 };

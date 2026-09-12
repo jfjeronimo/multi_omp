@@ -7,6 +7,7 @@
  * verifies availability by actually binding before it commits to a port.
  */
 import * as fs from "node:fs";
+import { isIP } from "node:net";
 
 /** Yield every port in [first, last] in order. */
 export function* rangePorts(first: number, last: number): Generator<number> {
@@ -26,6 +27,42 @@ export function probePortFree(port: number, hostname = "127.0.0.1"): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve a bind target to an IP literal. `Bun.serve({ hostname })` with a
+ * *hostname* (FQDN, e.g. "maat.menfis") makes the runtime resolve the name
+ * and bind whatever address it maps to — which inside a container is the
+ * machine's bridge IP, an address the Docker port-forward already claims,
+ * so the kernel rejects the bind with EADDRINUSE and the /proc diagnosis
+ * finds no socket at all (nothing was ever created in this namespace).
+ *
+ * IPs pass through untouched ("0.0.0.0", "127.0.0.1", "::", …). Any other
+ * value is resolved via DNS; an IPv4 address is preferred when available
+ * (IPv6 loopback exists even where the interface has no IPv6).
+ *
+ * @throws with an actionable message when the name cannot be resolved.
+ */
+export async function resolveBindHost(host: string): Promise<string> {
+  if (isIP(host) !== 0) return host;
+  let addrs: { address: string; family: number }[];
+  try {
+    addrs = await Bun.dns.lookup(host);
+  } catch (e) {
+    throw new Error(
+      `multi-omp: cannot resolve bind host "${host}" (${(e as Error).message}); ` +
+        `set MULTI_OMP_HOST to an IP address (0.0.0.0 in Docker) instead of a hostname`,
+    );
+  }
+  if (addrs.length === 0) {
+    throw new Error(
+      `multi-omp: bind host "${host}" resolved to no address; ` +
+        `set MULTI_OMP_HOST to an IP address (0.0.0.0 in Docker) instead of a hostname`,
+    );
+  }
+  const ip = (addrs.find((a) => a.family === 4) ?? addrs[0]).address;
+  console.warn(`multi-omp: bind host "${host}" resolved to ${ip}; binding ${ip}`);
+  return ip;
 }
 
 /* -------------------------------------------------------------------------- */

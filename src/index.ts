@@ -15,7 +15,7 @@ const home = process.env.MULTI_OMP_HOME ?? `${process.env.HOME}/.omp/multi-omp`;
 const store = new FileNodeStore(`${home}/nodes.json`);
 await store.load();
 const hostname = process.env.MULTI_OMP_HOST ?? process.env.HOSTNAME_BIND ?? "127.0.0.1";
-const gateway = createGateway({
+const gateway = await createGateway({
   store,
   port: Number(process.env.MULTI_OMP_PORT ?? process.env.PORT ?? 30140),
   hostname,

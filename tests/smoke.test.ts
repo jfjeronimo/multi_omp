@@ -29,7 +29,7 @@ describe("smoke: real omp-web", () => {
     }
     store = new MemoryNodeStore();
     store.add({ id: "local", name: "Local", url: REAL_URL, port: NODE_PORT });
-    gw = createGateway({
+    gw = await createGateway({
       store,
       port: 0,
       hostname: "127.0.0.1",

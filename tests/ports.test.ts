@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { diagnosePortHeld } from "../src/ports";
+import { isIP } from "node:net";
+import { diagnosePortHeld, resolveBindHost } from "../src/ports";
 
 /**
  * diagnosePortHeld reads /proc/net/tcp{,6} + /proc/[pid]/fd from inside the
@@ -72,5 +73,34 @@ describe("diagnosePortHeld", () => {
     expect(text).toContain(`ss -ltnp | grep :${port}`);
     // Guidance is printed in every branch.
     expect(text).toContain("docker ps -a");
+  });
+});
+
+describe("resolveBindHost", () => {
+  test("passes IP literals through untouched", async () => {
+    expect(await resolveBindHost("0.0.0.0")).toBe("0.0.0.0");
+    expect(await resolveBindHost("127.0.0.1")).toBe("127.0.0.1");
+    expect(await resolveBindHost("::")).toBe("::");
+  });
+
+  test("resolves a hostname to an IP literal", async () => {
+    // localhost is resolvable everywhere; the result must be an IP literal,
+    // never a bare name.
+    const ip = await resolveBindHost("localhost");
+    expect(isIP(ip)).not.toBe(0);
+    expect(ip).not.toBe("localhost");
+  });
+
+  test("throws an actionable error for an unresolvable name", async () => {
+    let threw = false;
+    try {
+      await resolveBindHost("multi-omp-no-such-host.invalid");
+    } catch (e) {
+      threw = true;
+      const msg = (e as Error).message;
+      expect(msg).toContain("multi-omp-no-such-host.invalid");
+      expect(msg).toContain("MULTI_OMP_HOST");
+    }
+    expect(threw).toBe(true);
   });
 });

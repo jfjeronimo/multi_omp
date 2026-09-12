@@ -68,7 +68,7 @@ describe("EADDRINUSE recovery", () => {
     await waitPortHeld(occupied);
 
     store.add({ id: "n1", name: "N1", url: mock.url, port: occupied });
-    const gw = createGateway({
+    const gw = await createGateway({
       store,
       port: 0,
       hostname: "127.0.0.1",
@@ -99,7 +99,7 @@ describe("EADDRINUSE recovery", () => {
     await waitPortHeld(occupied);
 
     store.add({ id: "n2", name: "N2", url: mock.url, port: occupied });
-    const gw = createGateway({
+    const gw = await createGateway({
       store,
       port: 0,
       hostname: "127.0.0.1",
@@ -130,7 +130,7 @@ describe("EADDRINUSE recovery", () => {
 
     // createGateway blocks the event loop while it retries; the child
     // releases the port on its own clock, so the bind must eventually win.
-    const gw = createGateway({
+    const gw = await createGateway({
       store,
       port,
       hostname: "127.0.0.1",
