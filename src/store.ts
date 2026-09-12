@@ -29,6 +29,10 @@ export interface OmpNode {
   password?: string;
   /** Optional note shown in the dashboard. */
   note?: string;
+  /** Telegram bot token for notifications (optional). */
+  telegramToken?: string;
+  /** Telegram chat id (channel or user) for notifications (optional). */
+  telegramChatId?: string;
   /** Local port the gateway listens on to proxy this node. */
   port?: number;
 }

@@ -11,13 +11,33 @@
  * Node ports are persisted on the node record, so they are stable across
  * gateway restarts.
  */
-
 import type { NodeStore, OmpNode } from "./store";
 import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
-import { proxyRequest } from "./proxy";
+import { proxyRequest, filterResponseHeaders } from "./proxy";
 import { probePortFree, rangePorts } from "./ports";
-import { renderDashboard, type DashboardNode } from "./dashboard";
+import { renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
+import {
+  createSessionNotifier,
+  nodeSnapshot,
+  sendTelegram,
+  type NotifierSnapshot,
+  type SessionNotifier,
+} from "./telegram";
+
+/**
+ * CORS headers for the control-plane API. The node-switcher bar lives on a
+ * node port (e.g. :30201) and fetches this API cross-origin; the API is
+ * credential-free from the browser's point of view (node credentials are
+ * injected server-side by the gateway), so a blanket `*` origin is safe.
+ */
+function corsHeaders(): Record<string, string> {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "access-control-allow-headers": "content-type, authorization",
+  };
+}
 
 /** Bun's HTTP server (WebSocketData = unknown, the default). */
 export type Server = Bun.Server<unknown>;
@@ -53,6 +73,12 @@ export interface GatewayOptions {
   statusOf?: (node: OmpNode) => Promise<NodeStatus>;
   /** Local port range for node listeners (defaults 30200-30299). */
   portRange?: { first: number; last: number };
+  /** Telegram notifier poll interval in ms; 0 disables the notifier. */
+  notifierIntervalMs?: number;
+  /** Injected for tests: replace the notifier factory. */
+  createNotifier?: (
+    opts: Parameters<typeof createSessionNotifier>[0],
+  ) => SessionNotifier;
 }
 
 export function createGateway(opts: GatewayOptions): Gateway {
@@ -61,6 +87,40 @@ export function createGateway(opts: GatewayOptions): Gateway {
   const version = opts.version ?? "0.1.0";
   const statusOf = opts.statusOf ?? checkNode;
   const portRange = opts.portRange ?? { first: 30200, last: 30299 };
+  /**
+   * Bun.serve throws synchronously when the port is taken. On container
+   * restarts the previous process is often still releasing the socket
+   * (TIME_WAIT / not yet SIGKILLed), so a single attempt fails with
+   * EADDRINUSE. Retry on EADDRINUSE with backoff until the port frees up or
+   * `maxMs` elapses, then rethrow.
+   */
+  function bindWithRetry(
+    make: (port: number) => Server,
+    port: number,
+    maxMs = 15000,
+    baseDelayMs = 150,
+  ): Server {
+    const started = Date.now();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return make(port);
+      } catch (e) {
+        const code = typeof e === "object" && e !== null && "code" in e ? (e as { code: string }).code : undefined;
+        const isAddrInUse =
+          e instanceof Error &&
+          (code === "EADDRINUSE" || e.message.includes("EADDRINUSE") || e.message.includes("in use"));
+        if (!isAddrInUse) throw e;
+        const elapsed = Date.now() - started;
+        if (elapsed >= maxMs) throw e;
+        const delay = Math.min(baseDelayMs * attempt, 2000);
+        console.warn(
+          `multi-omp: port ${port} busy (attempt ${attempt}); retrying in ${delay}ms`,
+        );
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+      }
+    }
+  }
+
 
   /** id -> running node listener. */
   const listeners = new Map<string, NodeListener>();
@@ -91,8 +151,8 @@ export function createGateway(opts: GatewayOptions): Gateway {
     if (nodePort === null) throw new Error(`No free local port in range ${portRange.first}-${portRange.last}`);
     // The handler re-reads the node from the store on every request, so a
     // url/credential PATCH takes effect immediately without a restart.
-    const server = Bun.serve({
-      port: nodePort,
+    const server = bindWithRetry((p) => Bun.serve({
+      port: p,
       hostname,
       fetch: async (req) => {
         const current = opts.store.get(node.id);
@@ -103,7 +163,30 @@ export function createGateway(opts: GatewayOptions): Gateway {
           });
         }
         try {
-          return await proxyRequest(req, current);
+          const res = await proxyRequest(req, current);
+          // Inject the node-switcher bar into the root HTML document. Only the
+          // browser-facing HTML page (not API/SSE/asset responses) is touched.
+          const ctype = res.headers.get("content-type") ?? "";
+          if (
+            req.method === "GET" &&
+            res.status === 200 &&
+            ctype.includes("text/html") &&
+            !req.url.includes("/api/") &&
+            !req.url.startsWith("data:")
+          ) {
+            const body = await res.text();
+            const gwOrigin = `http://${hostname}:${port}`;
+            const bar = renderNodeBar(gwOrigin, current.id);
+            const html = body.includes("</body>")
+              ? body.replace("</body>", `${bar}\n</body>`)
+              : body + bar;
+            return new Response(html, {
+              status: res.status,
+              statusText: res.statusText,
+              headers: filterResponseHeaders(res),
+            });
+          }
+          return res;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           return new Response(JSON.stringify({ error: `proxy to ${current.id} failed: ${msg}` }), {
@@ -112,7 +195,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
           });
         }
       },
-    });
+    }), nodePort);
     const listener: NodeListener = { id: node.id, server };
     listeners.set(node.id, listener);
     return listener;
@@ -151,6 +234,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
         port: n.port,
         hasPassword: Boolean(n.password),
         note: n.note,
+        hasTelegram: Boolean(n.telegramToken && n.telegramChatId),
         status: await statusOf(n),
       })),
     );
@@ -195,9 +279,18 @@ export function createGateway(opts: GatewayOptions): Gateway {
   }
 
   async function controlPlane(req: Request, url: URL): Promise<Response> {
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+    const res = await controlPlaneInner(req, url);
+    const h = new Headers(res.headers);
+    for (const [k, v] of Object.entries(corsHeaders())) h.set(k, v);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+  }
+
+  async function controlPlaneInner(req: Request, url: URL): Promise<Response> {
     const path = url.pathname;
     const method = req.method;
-
     if (path === "/api/health" && method === "GET") {
       const statuses = await Promise.all(
         opts.store.list().map(async (n) => ({ id: n.id, status: await statusOf(n) })),
@@ -243,6 +336,8 @@ export function createGateway(opts: GatewayOptions): Gateway {
           username: typeof body.username === "string" && body.username ? body.username : "omp",
           password: typeof body.password === "string" && body.password ? body.password : undefined,
           note: typeof body.note === "string" && body.note ? body.note : undefined,
+          telegramToken: typeof body.telegramToken === "string" && body.telegramToken ? body.telegramToken : undefined,
+          telegramChatId: typeof body.telegramChatId === "string" && body.telegramChatId ? body.telegramChatId : undefined,
         });
         return new Response(JSON.stringify({ node: publicNode(node), status }), {
           status: 201,
@@ -254,6 +349,35 @@ export function createGateway(opts: GatewayOptions): Gateway {
           headers: { "content-type": "application/json" },
         });
       }
+    }
+    const mm = path.match(/^\/api\/nodes\/([^/]+)\/metrics$/);
+    if (mm) {
+      const id = decodeURIComponent(mm[1]);
+      const node = opts.store.get(id);
+      if (!node) {
+        return new Response(JSON.stringify({ error: `Unknown node "${id}"` }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (method !== "GET") {
+        return new Response(JSON.stringify({ error: "Method not allowed" }), {
+          status: 405,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const status = await statusOf(node);
+      const snap = await nodeSnapshot(node);
+      const sessions = Object.values(snap.sessions);
+      return new Response(
+        JSON.stringify({
+          status,
+          running: sessions.filter((s) => s.state === "running").length,
+          waiting: sessions.filter((s) => s.state === "waiting").length,
+          idle: sessions.filter((s) => s.state === "idle").length,
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
     }
     const m = path.match(/^\/api\/nodes\/([^/]+)$/);
     if (m) {
@@ -297,6 +421,10 @@ export function createGateway(opts: GatewayOptions): Gateway {
         else if (typeof body.password === "string") patch.password = body.password;
         if (body.username === null) patch.username = undefined;
         else if (typeof body.username === "string") patch.username = body.username;
+        if (body.telegramToken === null) patch.telegramToken = undefined;
+        else if (typeof body.telegramToken === "string") patch.telegramToken = body.telegramToken;
+        if (body.telegramChatId === null) patch.telegramChatId = undefined;
+        else if (typeof body.telegramChatId === "string") patch.telegramChatId = body.telegramChatId;
         try {
           const { node: updated, status } = await updateNode(id, patch);
           return new Response(JSON.stringify({ node: publicNode(updated), status }), {
@@ -338,7 +466,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     });
   };
 
-  const server = Bun.serve({ port, hostname, fetch: handler });
+  const server = bindWithRetry((p) => Bun.serve({ port: p, hostname, fetch: handler }), port);
 
   // Boot listeners for nodes that were already in the store. A node whose
   // saved port is now held by the OS is re-assigned to a free one.
@@ -348,8 +476,9 @@ export function createGateway(opts: GatewayOptions): Gateway {
     } catch {
       // Saved port is now held: clear it and try to allocate a fresh one.
       try {
-        opts.store.update(node.id, { port: undefined });
-        ensureNodeServer({ ...node, port: undefined });
+        const reassigned = startNodeServer({ ...node, port: undefined });
+        // Persist the new port so the next boot keeps it.
+        opts.store.update(node.id, { port: reassigned.server.port });
       } catch (e) {
         // Nothing available in the whole range: restore the saved port so the
         // node keeps its record and the next boot can retry.
@@ -359,6 +488,40 @@ export function createGateway(opts: GatewayOptions): Gateway {
     }
   }
 
+  // Telegram notifier: polls each node's session states and messages the
+  // user when a session starts, finishes a turn, or waits for input.
+  const byId = (id: string) => opts.store.get(id);
+  const notifierIntervalMs = opts.notifierIntervalMs ?? 10_000;
+  const notifier = notifierIntervalMs > 0
+    ? (opts.createNotifier ?? createSessionNotifier)({
+        intervalMs: notifierIntervalMs,
+        collect: async () => {
+          const nodes = opts.store.list();
+          const snaps = await Promise.all(
+            nodes.map(async (n) => {
+              const base = await nodeSnapshot(n);
+              return {
+                ...base,
+                telegram:
+                  n.telegramToken && n.telegramChatId
+                    ? { token: n.telegramToken, chatId: n.telegramChatId }
+                    : null,
+              };
+            }),
+          );
+          return snaps;
+        },
+        send: (nodeId, text) => {
+          const n = byId(nodeId);
+          if (!n?.telegramToken || !n.telegramChatId) {
+            return Promise.resolve({ ok: false, error: "telegram not configured" });
+          }
+          return sendTelegram({ token: n.telegramToken, chatId: n.telegramChatId }, text);
+        },
+      })
+    : undefined;
+  notifier?.start();
+
   return {
     server,
     nodes: () => [...listeners.values()],
@@ -367,6 +530,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     updateNode,
     removeNode,
     stop: () => {
+      notifier?.stop();
       for (const l of listeners.values()) l.server.stop(true);
       listeners.clear();
       server.stop(true);
@@ -374,8 +538,21 @@ export function createGateway(opts: GatewayOptions): Gateway {
   };
 }
 
-/** Strip credentials before a node is sent to the browser. */
-function publicNode(node: OmpNode): Omit<OmpNode, "password"> & { hasPassword: boolean } {
-  const { password, ...rest } = node;
-  return { ...rest, hasPassword: Boolean(password) };
+/**
+ * Strip credentials before a node is sent to the browser. The telegram bot
+ * token is masked to its leading digits (the bot id) so the dashboard can
+ * show "configured for bot 123456" without leaking the secret.
+ */
+function publicNode(node: OmpNode): Omit<OmpNode, "password" | "telegramToken"> & {
+  hasPassword: boolean;
+  hasTelegram: boolean;
+  telegramBotId?: string;
+} {
+  const { password, telegramToken, ...rest } = node;
+  return {
+    ...rest,
+    hasPassword: Boolean(password),
+    hasTelegram: Boolean(telegramToken && node.telegramChatId),
+    telegramBotId: telegramToken ? telegramToken.split(":")[0] : undefined,
+  };
 }
