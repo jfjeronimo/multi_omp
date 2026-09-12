@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { isIP } from "node:net";
-import { diagnosePortHeld, resolveBindHost } from "../src/ports";
+import {
+  diagnosePortHeld,
+  isLocalBindIp,
+  localIpv4s,
+  resolveBindHost,
+  selectBindHost,
+} from "../src/ports";
 
 /**
  * diagnosePortHeld reads /proc/net/tcp{,6} + /proc/[pid]/fd from inside the
@@ -102,5 +108,50 @@ describe("resolveBindHost", () => {
       expect(msg).toContain("MULTI_OMP_HOST");
     }
     expect(threw).toBe(true);
+  });
+});
+
+/**
+ * localIpv4s / isLocalBindIp / selectBindHost: the fix for the container
+ * crash-loop. A bind host that resolves to a non-local IPv4 (e.g. the
+ * machine FQDN → the host LAN IP, seen from inside a container whose own
+ * addresses are the loopback and the bridge IP) must fall back to 0.0.0.0
+ * instead of hitting the kernel's EADDRNOTAVAIL (which some Bun versions
+ * surface as EADDRINUSE with errno 0).
+ */
+describe("localIpv4s / isLocalBindIp", () => {
+  test("always reports the loopback and every interface address as local", () => {
+    const locals = localIpv4s();
+    // Any Linux box: loopback is local.
+    expect(locals.has("127.0.0.1")).toBe(true);
+    expect(isLocalBindIp("127.0.0.1")).toBe(true);
+  });
+
+  test("wildcards are always bindable", () => {
+    expect(isLocalBindIp("0.0.0.0")).toBe(true);
+    expect(isLocalBindIp("::")).toBe(true);
+  });
+
+  test("a guaranteed non-local IPv4 (TEST-NET-3) is not local", () => {
+    // 203.0.113.0/24 is reserved (RFC 5737) — never assigned to a real
+    // interface, so this is deterministic on any machine.
+    const locals = localIpv4s();
+    if (locals.size > 0) {
+      expect(locals.has("203.0.113.7")).toBe(false);
+      expect(isLocalBindIp("203.0.113.7")).toBe(false);
+    }
+  });
+});
+
+describe("selectBindHost", () => {
+  test("keeps IP literals that are local", async () => {
+    expect(await selectBindHost("127.0.0.1")).toBe("127.0.0.1");
+    expect(await selectBindHost("0.0.0.0")).toBe("0.0.0.0");
+  });
+
+  test("falls back to 0.0.0.0 for a non-local IPv4 literal", async () => {
+    const locals = localIpv4s();
+    if (locals.size === 0) return; // non-Linux: selection passes through
+    expect(await selectBindHost("203.0.113.7")).toBe("0.0.0.0");
   });
 });

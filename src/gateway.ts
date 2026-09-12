@@ -15,7 +15,7 @@ import type { NodeStore, OmpNode } from "./store";
 import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest, filterResponseHeaders } from "./proxy";
-import { diagnosePortHeld, probePortFree, rangePorts, resolveBindHost } from "./ports";
+import { diagnosePortHeld, probePortFree, rangePorts, selectBindHost } from "./ports";
 import { renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
 import {
   createSessionNotifier,
@@ -85,10 +85,13 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
   const port = opts.port ?? 30140;
   const rawHost = opts.hostname ?? "127.0.0.1";
   // A hostname (e.g. the machine FQDN from HOSTNAME_BIND) must never reach
-  // Bun.serve: the runtime resolves it to the machine's bridge IP, an
-  // address the Docker port-forward already owns → EADDRINUSE with no
-  // visible socket in /proc. Resolve to an IP literal up front instead.
-  const hostname = await resolveBindHost(rawHost);
+  // Bun.serve: the runtime resolves it to the machine's LAN IP, which inside
+  // a container is not an address of the container's netns — the kernel
+  // refuses the bind (EADDRNOTAVAIL; some Bun versions report it as
+  // EADDRINUSE with errno 0) and no socket is ever created in /proc.
+  // selectBindHost resolves to an IP literal and falls back to 0.0.0.0 when
+  // that IP is not local to this environment.
+  const hostname = await selectBindHost(rawHost);
   const version = opts.version ?? "0.1.0";
   const statusOf = opts.statusOf ?? checkNode;
   const portRange = opts.portRange ?? { first: 30200, last: 30299 };

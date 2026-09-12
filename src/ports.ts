@@ -32,10 +32,11 @@ export function probePortFree(port: number, hostname = "127.0.0.1"): boolean {
 /**
  * Resolve a bind target to an IP literal. `Bun.serve({ hostname })` with a
  * *hostname* (FQDN, e.g. "maat.menfis") makes the runtime resolve the name
- * and bind whatever address it maps to — which inside a container is the
- * machine's bridge IP, an address the Docker port-forward already claims,
- * so the kernel rejects the bind with EADDRINUSE and the /proc diagnosis
- * finds no socket at all (nothing was ever created in this namespace).
+ * and bind whatever address it maps to. Inside a container that is the
+ * machine's LAN/bridge IP — not an address of the container's network
+ * namespace — so the kernel rejects the bind (EADDRNOTAVAIL; some Bun
+ * versions surface it as EADDRINUSE with errno 0) and no socket is ever
+ * created in /proc.
  *
  * IPs pass through untouched ("0.0.0.0", "127.0.0.1", "::", …). Any other
  * value is resolved via DNS; an IPv4 address is preferred when available
@@ -61,8 +62,75 @@ export async function resolveBindHost(host: string): Promise<string> {
     );
   }
   const ip = (addrs.find((a) => a.family === 4) ?? addrs[0]).address;
-  console.warn(`multi-omp: bind host "${host}" resolved to ${ip}; binding ${ip}`);
+  console.warn(`multi-omp: bind host "${host}" resolved to ${ip}`);
   return ip;
+}
+
+/**
+ * IPv4 addresses that are local to this network namespace, straight from the
+ * kernel's routing trie. Lines look like:
+ *
+ *   |-- 172.20.0.2
+ *      /32 host LOCAL
+ *
+ * The IP sits on the `|-- IP` line and the marker on the one below it. The
+ * set always contains 127.0.0.1; inside a container it contains the
+ * container's interface IPs and NOT the host's LAN IP.
+ *
+ * Returns an empty set when /proc/net/fib_trie is unreadable (non-Linux);
+ * callers must treat "unknown" as "don't interfere" (pass the IP through).
+ */
+export function localIpv4s(): Set<string> {
+  const locals = new Set<string>();
+  try {
+    const lines = fs.readFileSync("/proc/net/fib_trie", "utf8").split("\n");
+    for (let i = 0; i < lines.length - 1; i++) {
+      const m = lines[i].match(/^\s*\|--\s+(\d+\.\d+\.\d+\.\d+)$/);
+      if (m && /\/32 host LOCAL/.test(lines[i + 1])) locals.add(m[1]);
+    }
+  } catch {
+    return new Set<string>();
+  }
+  return locals;
+}
+
+/**
+ * True when `ip` can be bound in this network namespace:
+ * - wildcards (0.0.0.0, ::) are always fine;
+ * - IPv4: must appear in /proc/net/fib_trie (unknown set = non-Linux → fine);
+ * - IPv6: assumed fine (no cheap local enumeration; a wrong guess fails the
+ *   bind loudly instead of silently re-binding).
+ */
+export function isLocalBindIp(ip: string): boolean {
+  if (ip === "0.0.0.0" || ip === "::") return true;
+  if (isIP(ip) === 6) return true;
+  const locals = localIpv4s();
+  if (locals.size === 0) return true; // non-Linux: don't interfere
+  return locals.has(ip);
+}
+
+/**
+ * Choose the final bind host for `Bun.serve`.
+ *
+ * The full chain for the container case that used to crash-loop:
+ * MULTI_OMP_HOST="maat.menfis" → resolves to the host LAN IP 172.16.10.102 →
+ * not an address of the container's netns → the kernel refuses the bind and
+ * the gateway died every start. The intent behind "bind the machine's IP"
+ * from inside a container is "be reachable from outside the machine", and
+ * 0.0.0.0 achieves exactly that through Docker's port publishing — so a
+ * non-local IPv4 target falls back to 0.0.0.0 with a loud warning instead
+ * of crashing.
+ */
+export async function selectBindHost(rawHost: string): Promise<string> {
+  const ip = await resolveBindHost(rawHost);
+  if (isLocalBindIp(ip)) return ip;
+  const locals = [...localIpv4s()].sort().join(", ") || "unknown";
+  console.warn(
+    `multi-omp: "${rawHost}" → ${ip} is not an address of this environment ` +
+      `(local: ${locals}); binding 0.0.0.0 instead. ` +
+      `Inside Docker, set MULTI_OMP_HOST=0.0.0.0.`,
+  );
+  return "0.0.0.0";
 }
 
 /* -------------------------------------------------------------------------- */

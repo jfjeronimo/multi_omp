@@ -350,10 +350,11 @@ describe("gateway", () => {
   test("hostname bind target resolves to an IP and serves (no EADDRINUSE)", async () => {
     // Regression: a deployment can pass the machine FQDN (e.g. via
     // HOSTNAME_BIND) as the bind host. Bun.serve with a bare hostname
-    // resolves it to the machine's bridge IP — an address the Docker
-    // port-forward already owns — and the kernel rejects the bind with
-    // EADDRINUSE while no socket appears in /proc. The gateway must
-    // resolve the name to an IP literal up front and bind that instead.
+    // resolves it to the machine's IP — which inside a container is not an
+    // address of the container's netns, so the kernel refuses the bind
+    // (EADDRNOTAVAIL; some Bun versions report EADDRINUSE with errno 0)
+    // and no socket ever appears in /proc. The gateway must resolve the
+    // name to an IP literal up front and bind a local address instead.
     //
     // To exercise the FQDN path in every environment (bare hostnames in
     // Docker/CI have no dot, so os.hostname() is useless there), register
@@ -419,6 +420,61 @@ describe("gateway", () => {
       if (hostsEdited) {
         // Remove the synthetic entry so repeated runs and concurrent suites
         // do not stack duplicates in /etc/hosts.
+        try {
+          const contents = fs.readFileSync("/etc/hosts", "utf8");
+          fs.writeFileSync(
+            "/etc/hosts",
+            contents.split("\n").filter((l) => l.trim() !== entry).join("\n"),
+          );
+        } catch {
+          // best-effort; do not fail the test over cleanup
+        }
+      }
+    }
+  });
+
+  test("non-local bind target falls back to 0.0.0.0 and serves (no crash loop)", async () => {
+    // Regression for the container crash-loop: MULTI_OMP_HOST set to the
+    // machine FQDN resolves to the host LAN IP (e.g. 172.16.10.102), which
+    // is not an address of the container's netns — the kernel rejects the
+    // bind and the gateway died on every start. selectBindHost must fall
+    // back to 0.0.0.0 (Docker's port publishing reaches it anyway).
+    //
+    // 203.0.113.0/24 (RFC 5737 TEST-NET-3) is guaranteed non-local on any
+    // machine; a synthetic /etc/hosts name exercises the hostname path.
+    const SYNTHETIC = "multi-omp-nolocal.invalid";
+    const entry = `203.0.113.7\t${SYNTHETIC}`;
+    let hostsEdited = false;
+    let rawHost = "";
+    try {
+      try {
+        fs.appendFileSync("/etc/hosts", `\n${entry}\n`);
+        hostsEdited = true;
+        rawHost = SYNTHETIC;
+      } catch {
+        // /etc/hosts not writable: still exercise the path with the IP
+        // literal directly.
+        rawHost = "203.0.113.7";
+      }
+      const store5 = new MemoryNodeStore();
+      const gw5 = await createGateway({
+        store: store5,
+        port: 30971,
+        hostname: rawHost,
+        statusOf: checkNode,
+        notifierIntervalMs: 0,
+        portRange: { first: 30940, last: 30960 },
+      });
+      try {
+        // Non-local IPv4 → canonical container bind, not the raw target.
+        expect(gw5.server.hostname).toBe("0.0.0.0");
+        const res = await fetch("http://127.0.0.1:30971/api/health");
+        expect(res.status).toBe(200);
+      } finally {
+        gw5.stop();
+      }
+    } finally {
+      if (hostsEdited) {
         try {
           const contents = fs.readFileSync("/etc/hosts", "utf8");
           fs.writeFileSync(
