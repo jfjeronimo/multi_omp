@@ -89,7 +89,9 @@ Each node gets a local port from `30200–30299` (shown in the dashboard's
 "Local" column) and stays on that port across restarts. If a saved port is
 held by the OS at boot (previous crash, another process), the gateway keeps
 retrying it for 15s and then re-assigns a free one, persisting the new port
-so it is stable from then on.
+so it is stable from then on. The gateway's own port (default 30140) is
+never allocated to a node: a record that somehow carries it (e.g. an old
+`nodes.json`) is detected at boot and re-assigned automatically.
 
 ## Configuration (env)
 

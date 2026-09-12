@@ -278,4 +278,69 @@ describe("gateway", () => {
     expect((await fetch(`http://127.0.0.1:${nodePort}/`)).status).toBe(200);
     expect(mock.requests[before + 1]?.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
   });
+
+  test("node saved on the control-plane port is re-assigned, not crashed", async () => {
+    // Regression: a stale nodes.json can carry the gateway port (e.g. 30140).
+    // Boot must drop the poisoned port and allocate a fresh one instead of
+    // failing the whole gateway with EADDRINUSE.
+    const gwPort = 30900;
+    const store2 = new MemoryNodeStore();
+    store2.add({ id: "collide", name: "Collide", url: mock2.url, port: gwPort });
+    const gw2 = createGateway({
+      store: store2,
+      port: gwPort,
+      hostname: "127.0.0.1",
+      statusOf: checkNode,
+      notifierIntervalMs: 0,
+      portRange: { first: 30800, last: 30810 },
+    });
+    try {
+      const node = store2.get("collide");
+      expect(node?.port).toBeDefined();
+      expect(node?.port).not.toBe(gwPort);
+      expect(node?.port).toBeGreaterThanOrEqual(30800);
+      expect(node?.port).toBeLessThanOrEqual(30810);
+      const res = await fetch(`http://127.0.0.1:${node?.port}/`);
+      expect(res.status).toBe(200);
+      // The dashboard itself is still reachable on the control-plane port.
+      const dash = await fetch(`http://127.0.0.1:${gwPort}/api/health`);
+      expect(dash.status).toBe(200);
+    } finally {
+      gw2.stop();
+    }
+  });
+
+  test("POST /api/nodes never allocates the control-plane port", async () => {
+    // Contract: the gateway port can fall inside the node range; the
+    // allocator must never hand it out. (The range-skip in pickPort is
+    // defense-in-depth over probePortFree, which already detects the
+    // bound control plane; the explicit-port guard + ensureNodeServer
+    // self-heal are the load-bearing fix, covered by the test above.)
+    const gwPort = 30950;
+    const store3 = new MemoryNodeStore();
+    const gw3 = createGateway({
+      store: store3,
+      port: gwPort,
+      hostname: "127.0.0.1",
+      statusOf: checkNode,
+      notifierIntervalMs: 0,
+      portRange: { first: 30940, last: 30960 },
+    });
+    try {
+      const res = await gw3.handle(
+        new Request("http://gw/api/nodes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Range Node", url: mock2.url }),
+        }),
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { node: { port: number } };
+      expect(body.node.port).not.toBe(gwPort);
+      expect(body.node.port).toBeGreaterThanOrEqual(30940);
+      expect(body.node.port).toBeLessThanOrEqual(30960);
+    } finally {
+      gw3.stop();
+    }
+  });
 });

@@ -134,11 +134,15 @@ export function createGateway(opts: GatewayOptions): Gateway {
   /**
    * Choose a port for `node`: honor `node.port` when set, otherwise the first
    * range port that is neither allocated by multi-omp nor held by the OS
-   * (verified by a real bind). Returns null when nothing is available.
+   * (verified by a real bind). The control-plane port is always excluded, so
+   * a node can never shadow the dashboard. Returns null when nothing is
+   * available.
    */
   function pickPort(node: OmpNode): number | null {
-    if (node.port !== undefined) return node.port;
+    const chosen = node.port !== undefined && node.port !== port ? node.port : undefined;
+    if (chosen !== undefined) return chosen;
     for (const candidate of rangePorts(portRange.first, portRange.last)) {
+      if (candidate === port) continue;
       if (usedPorts().has(candidate)) continue;
       if (!probePortFree(candidate, hostname)) continue;
       return candidate;
@@ -220,6 +224,15 @@ export function createGateway(opts: GatewayOptions): Gateway {
   function ensureNodeServer(node: OmpNode): NodeListener {
     const existing = listeners.get(node.id);
     if (existing && existing.server.port === node.port) return existing;
+    // A node whose saved port is the control-plane port can never bind
+    // (the dashboard owns it): drop the saved port and allocate a fresh one.
+    if (node.port === port) {
+      console.warn(
+        `multi-omp: node ${node.id} saved port ${port} collides with the control plane; re-assigning`,
+      );
+      opts.store.update(node.id, { port: undefined });
+      node = { ...node, port: undefined };
+    }
     stopNodeServer(node.id);
     return startNodeServer(node);
   }
