@@ -487,4 +487,40 @@ describe("gateway", () => {
       }
     }
   });
+
+  test("client-facing URLs use the request Host header, not the bind host", async () => {
+    // The Docker case: the gateway binds 0.0.0.0 but the browser reaches it
+    // via the machine's hostname. Generated URLs (dashboard Open links,
+    // switcher-bar GW origin) must use the reachable host from the request,
+    // or the bar's /api/nodes fetch goes to http://0.0.0.0:PORT and dies.
+    const store6 = new MemoryNodeStore();
+    const gw6 = await createGateway({
+      store: store6,
+      port: 30972,
+      hostname: "127.0.0.1",
+      statusOf: checkNode,
+      notifierIntervalMs: 0,
+      portRange: { first: 30940, last: 30960 },
+    });
+    try {
+      await gw6.addNode({ name: "HostProbe", url: mock2.url, password: "mock-pass", port: 30965 });
+      const dash = await gw6.handle(
+        new Request("http://gw/", { headers: { host: "maat.menfis" } }),
+      );
+      const html = await dash.text();
+      // The Open link uses the public host, never the bind address.
+      expect(html).toContain(`http://maat.menfis:30965/`);
+      expect(html).not.toContain("http://127.0.0.1:30965/");
+
+      // The bar injected into the node page uses the same public host.
+      const barRes = await fetch("http://127.0.0.1:30965/", {
+        headers: { host: "maat.menfis:30965" },
+        redirect: "manual",
+      });
+      const barHtml = await barRes.text();
+      expect(barHtml).toContain('var GW = "http://maat.menfis:30972";');
+    } finally {
+      gw6.stop();
+    }
+  });
 });

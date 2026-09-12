@@ -81,6 +81,22 @@ export interface GatewayOptions {
   ) => SessionNotifier;
 }
 
+/**
+ * Client-facing host for the URLs the browser uses to reach the gateway:
+ * the `Host` header of the request (hostname part, no port) — the name the
+ * browser already proved it can resolve and reach. The bind hostname
+ * (`0.0.0.0` in Docker) is NOT reachable by a client, so it must never
+ * appear in a generated URL; it is only the fallback for requests without
+ * a `Host` header (curl, tests).
+ */
+function publicHostOf(req: Request, bindHost: string): string {
+  const h = req.headers.get("host");
+  if (h) {
+    const host = h.split(":")[0] ?? h; // "host:port" → "host" (IPv6 literal: first ":" split is still the hostname here — Bun sends "ipv6:port" unbracketed, and the browser never does)
+    if (host) return host;
+  }
+  return bindHost;
+}
 export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
   const port = opts.port ?? 30140;
   const rawHost = opts.hostname ?? "127.0.0.1";
@@ -187,7 +203,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
             !req.url.startsWith("data:")
           ) {
             const body = await res.text();
-            const gwOrigin = `http://${hostname}:${port}`;
+            const gwOrigin = `http://${publicHostOf(req, hostname)}:${port}`;
             const bar = renderNodeBar(gwOrigin, current.id);
             const html = body.includes("</body>")
               ? body.replace("</body>", `${bar}\n</body>`)
@@ -249,7 +265,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
     return { node, status: await statusOf(node) };
   }
 
-  async function dashboard(): Promise<Response> {
+  async function dashboard(req: Request): Promise<Response> {
     const nodes: DashboardNode[] = await Promise.all(
       opts.store.list().map(async (n) => ({
         id: n.id,
@@ -262,7 +278,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
         status: await statusOf(n),
       })),
     );
-    return new Response(renderDashboard(nodes, hostname, port, version), {
+    return new Response(renderDashboard(nodes, publicHostOf(req, hostname), port, version), {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
@@ -481,7 +497,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
 
   const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
-    if (url.pathname === "/" && req.method === "GET") return dashboard();
+    if (url.pathname === "/" && req.method === "GET") return dashboard(req);
     if (url.pathname.startsWith("/api/")) return controlPlane(req, url);
     if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ error: "Not found" }), {
