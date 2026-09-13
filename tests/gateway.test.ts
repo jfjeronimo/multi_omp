@@ -144,12 +144,28 @@ describe("gateway", () => {
     // Still no prefix rewriting / base tag / dashboard overlay.
     expect(html).not.toContain("<base");
     expect(html).not.toContain("multi-omp-overlay");
+    // The node page's own favicon links are replaced with the gateway's,
+    // so the tab icon is the multi-omp mark while viewing a node.
+    const gwOrigin = `http://127.0.0.1:${gw.server.port}`;
+    expect(html).toContain(`<link rel="icon" type="image/svg+xml" href="${gwOrigin}/favicon.svg">`);
+    expect(html).not.toContain('href="/favicon.ico"');
     // Hidden bar must be recoverable: restore chip present, wired to un-hide.
     expect(html).toContain('id="momo-restore"');
     expect(html).toContain('localStorage.removeItem("momo-bar-hidden")');
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
+  });
+
+  test("gateway serves the multi-omp favicon at /favicon.ico and /favicon.svg", async () => {
+    for (const path of ["/favicon.ico", "/favicon.svg"]) {
+      const res = await gw.handle(new Request(`http://gw${path}`));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("image/svg+xml");
+      const body = await res.text();
+      expect(body).toContain("<svg");
+      expect(body).toContain("mompig");
+    }
   });
 
   test("node listener rewrites browser Origin to the node origin on api calls", async () => {

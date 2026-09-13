@@ -16,7 +16,7 @@ import { parseNodeId, slugify } from "./store";
 import { checkNode, type NodeStatus } from "./upstream";
 import { proxyRequest, filterResponseHeaders } from "./proxy";
 import { diagnosePortHeld, probePortFree, rangePorts, selectBindHost } from "./ports";
-import { renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
+import { nodeFaviconLink, renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
 import {
   createSessionNotifier,
   nodeSnapshot,
@@ -42,8 +42,34 @@ function corsHeaders(): Record<string, string> {
 /** Bun's HTTP server (WebSocketData = unknown, the default). */
 export type Server = Bun.Server<unknown>;
 
-/** The doubled Oh-My-Pi mark served at /favicon.ico (SVG, no binary .ico). */
+/**
+ * The doubled Oh-My-Pi mark, served as the gateway favicon. It is SVG
+ * (no binary .ico), so it is also exposed at /favicon.svg — a `.svg`
+ * path browsers honor for SVG content — while /favicon.ico keeps the
+ * classic URL browsers request by default.
+ */
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 64"><defs><linearGradient id="mompig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d946ef"/><stop offset="0.5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs><path fill="url(#mompig)" opacity=".4" transform="translate(14,-4)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/><path fill="url(#mompig)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/></svg>`;
+
+/**
+ * Replace the node page's own favicon links with the gateway's mark so
+ * the browser tab shows multi-omp while viewing any node:
+ *  - existing `rel` links naming `icon` (incl. `apple-touch-icon`) are
+ *    removed,
+ *  - the gateway's `<link rel="icon" href="{gwOrigin}/favicon.svg">`
+ *    goes right after `<head>`.
+ * The injected link is absolute (the page is served from the node
+ * origin, the favicon from the control-plane origin).
+ */
+function rewriteNodeIcons(body: string, faviconLink: string): string {
+  const stripped = body.replace(
+    /<link\b[^>]*rel\s*=\s*(["'])(?:[^"']*?icon|apple-touch-icon)\1[^>]*>/gi,
+    "",
+  );
+  const idx = stripped.indexOf("<head");
+  if (idx < 0) return stripped;
+  const end = stripped.indexOf(">", idx);
+  return end < 0 ? stripped : stripped.slice(0, end + 1) + faviconLink + stripped.slice(end + 1);
+}
 
 export interface NodeListener {
   id: string;
@@ -102,6 +128,8 @@ function publicHostOf(req: Request, bindHost: string): string {
 }
 export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
   const port = opts.port ?? 30140;
+  /** The control-plane port actually bound. `port` stays the requested value (it is 0 for ephemeral); client-facing URLs must use the bound one. */
+  let gwPort = port;
   const rawHost = opts.hostname ?? "127.0.0.1";
   // A hostname (e.g. the machine FQDN from HOSTNAME_BIND) must never reach
   // Bun.serve: the runtime resolves it to the machine's LAN IP, which inside
@@ -206,15 +234,23 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
             !req.url.startsWith("data:")
           ) {
             const body = await res.text();
-            const gwOrigin = `http://${publicHostOf(req, hostname)}:${port}`;
+            const gwOrigin = `http://${publicHostOf(req, hostname)}:${gwPort}`;
+            const withIcon = rewriteNodeIcons(body, nodeFaviconLink(gwOrigin));
             const bar = renderNodeBar(gwOrigin, current.id);
             const html = body.includes("</body>")
-              ? body.replace("</body>", `${bar}\n</body>`)
-              : body + bar;
+              ? withIcon.replace("</body>", `${bar}\n</body>`)
+              : withIcon + bar;
+            const headers = filterResponseHeaders(res);
+            // The body is mutated below (favicon + bar), so the upstream's
+            // validators no longer identify what we serve: a client that
+            // revalidates would get a 304 from the upstream and reuse its
+            // pre-mutation cached body — stale page forever.
+            delete headers.etag;
+            delete headers["last-modified"];
             return new Response(html, {
               status: res.status,
               statusText: res.statusText,
-              headers: filterResponseHeaders(res),
+              headers,
             });
           }
           return res;
@@ -502,7 +538,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
     const url = new URL(req.url);
     if (url.pathname === "/" && req.method === "GET") return dashboard(req);
     if (url.pathname.startsWith("/api/")) return controlPlane(req, url);
-    if (url.pathname === "/favicon.ico")
+    if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg")
       return new Response(FAVICON_SVG, {
         headers: { "content-type": "image/svg+xml" },
       });
@@ -515,6 +551,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
   let server: Server;
   try {
     server = bindWithRetry((p) => Bun.serve({ port: p, hostname, fetch: handler }), port);
+    gwPort = server.port || port;
   } catch (e) {
     // The dashboard must live on its configured port: never re-assign. Print a
     // diagnosis of who is holding the port before the process exits.
