@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 150" width="340" height="150">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <!-- OMP drawn as strokes: O, M, P -->
+    <g id="omp" fill="none" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+      <!-- O -->
+      <circle cx="55" cy="60" r="34"/>
+      <!-- M -->
+      <path d="M120 94 L120 26 L153 62 L186 26 L186 94"/>
+      <!-- P: stem + bowl -->
+      <path d="M228 94 L228 26 L258 26 A19 19 0 0 1 258 64 L228 64"/>
+    </g>
+  </defs>
+
+  <!-- Capa trasera: desplazada, translúcida -->
+  <use href="#omp" transform="translate(14,10)" stroke="url(#g2)" opacity="0.4"/>
+
+  <!-- Capa frontal -->
+  <use href="#omp" transform="translate(6,4)" stroke="url(#g1)"/>
+</svg>
