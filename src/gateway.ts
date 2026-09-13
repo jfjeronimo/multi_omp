@@ -42,6 +42,9 @@ function corsHeaders(): Record<string, string> {
 /** Bun's HTTP server (WebSocketData = unknown, the default). */
 export type Server = Bun.Server<unknown>;
 
+/** The doubled Oh-My-Pi mark served at /favicon.ico (SVG, no binary .ico). */
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 64"><defs><linearGradient id="mompig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d946ef"/><stop offset="0.5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs><path fill="url(#mompig)" opacity=".4" transform="translate(14,-4)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/><path fill="url(#mompig)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/></svg>`;
+
 export interface NodeListener {
   id: string;
   server: Server;
@@ -499,7 +502,10 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
     const url = new URL(req.url);
     if (url.pathname === "/" && req.method === "GET") return dashboard(req);
     if (url.pathname.startsWith("/api/")) return controlPlane(req, url);
-    if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
+    if (url.pathname === "/favicon.ico")
+      return new Response(FAVICON_SVG, {
+        headers: { "content-type": "image/svg+xml" },
+      });
     return new Response(JSON.stringify({ error: "Not found" }), {
       status: 404,
       headers: { "content-type": "application/json" },

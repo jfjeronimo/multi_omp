@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 64" width="80" height="64">
+  <defs>
+    <linearGradient id="mompig" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d946ef"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <!-- multi-omp: two Oh-My-Pi pi marks side by side, back one offset and translucent -->
+  <path fill="url(#mompig)" opacity=".4" transform="translate(14,-4)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/>
+  <path fill="url(#mompig)" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/>
+</svg>
