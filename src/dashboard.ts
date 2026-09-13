@@ -19,19 +19,15 @@ export interface DashboardNode {
 
 
 /**
- * Double-pi monogram (the Oh My Pi logo, stacked twice for multi-omp),
- * inlined so the dashboard and node bar stay self-contained (no external
- * assets). Geometry mirrors logo-multi-omp.svg in the repo root, derived
- * from the official pi.dev logo mark. `momo-` prefixed ids so the node bar
- * never clashes with ids on arbitrary omp-web pages it is injected into.
+ * The Oh-My-Pi icon (can1357/oh-my-pi assets/icon.svg: pi symbol with an
+ * orange plugin connector), stacked twice to symbolize multiple omp
+ * instances. Inlined so the dashboard and node bar stay self-contained
+ * (no external assets); geometry mirrors logo-multi-omp.svg in the repo
+ * root.
  */
-const LOGO_SVG = `<svg class="momo-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true">
-<defs>
-<linearGradient id="momo-g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
-<linearGradient id="momo-g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
-</defs>
-<g fill="url(#momo-g2)" opacity=".45" transform="translate(48,-34)"><path fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path d="M517.36 400 H634.72 V634.72 H517.36 Z"/></g>
-<g fill="url(#momo-g1)"><path fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path d="M517.36 400 H634.72 V634.72 H517.36 Z"/></g>
+const LOGO_SVG = `<svg class="momo-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 172 142" aria-hidden="true">
+<g transform="translate(46,-26)" opacity=".45"><rect x="10" y="8" width="100" height="12" rx="2" fill="#c9c9c9"/><rect x="25" y="20" width="12" height="62" rx="2" fill="#c9c9c9"/><rect x="75" y="20" width="12" height="45" rx="2" fill="#c9c9c9"/><rect x="71" y="55" width="20" height="16" rx="3" fill="#f97316"/><rect x="76" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><rect x="82" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><circle cx="18" cy="14" r="2" fill="#f97316" opacity="0.8"/><circle cx="102" cy="14" r="2" fill="#f97316" opacity="0.8"/></g>
+<g><rect x="10" y="8" width="100" height="12" rx="2" fill="#fafafa"/><rect x="25" y="20" width="12" height="62" rx="2" fill="#fafafa"/><rect x="75" y="20" width="12" height="45" rx="2" fill="#fafafa"/><rect x="71" y="55" width="20" height="16" rx="3" fill="#f97316"/><rect x="76" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><rect x="82" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><circle cx="18" cy="14" r="2" fill="#f97316" opacity="0.8"/><circle cx="102" cy="14" r="2" fill="#f97316" opacity="0.8"/></g>
 </svg>`;
 
 /**
@@ -69,7 +65,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20800%20800%22%3E%3Cg%20fill%3D%22%23a78bfa%22%20opacity%3D%22.45%22%20transform%3D%22translate%2848%2C-34%29%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M165.29%20165.29%20H517.36%20V400%20H400%20V517.36%20H282.65%20V634.72%20H165.29%20Z%20M282.65%20282.65%20V400%20H400%20V282.65%20Z%22%2F%3E%3Cpath%20d%3D%22M517.36%20400%20H634.72%20V634.72%20H517.36%20Z%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%238b5cf6%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M165.29%20165.29%20H517.36%20V400%20H400%20V517.36%20H282.65%20V634.72%20H165.29%20Z%20M282.65%20282.65%20V400%20H400%20V282.65%20Z%22%2F%3E%3Cpath%20d%3D%22M517.36%20400%20H634.72%20V634.72%20H517.36%20Z%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20150%20142%22%3E%3Cg%20transform%3D%22translate%2846%2C-26%29%22%20opacity%3D%22.45%22%3E%3Crect%20x%3D%2210%22%20y%3D%228%22%20width%3D%22100%22%20height%3D%2212%22%20rx%3D%222%22%20fill%3D%22%23c9c9c9%22/%3E%3Crect%20x%3D%2225%22%20y%3D%2220%22%20width%3D%2212%22%20height%3D%2262%22%20rx%3D%222%22%20fill%3D%22%23c9c9c9%22/%3E%3Crect%20x%3D%2275%22%20y%3D%2220%22%20width%3D%2212%22%20height%3D%2245%22%20rx%3D%222%22%20fill%3D%22%23c9c9c9%22/%3E%3C/g%3E%3Cg%20fill%3D%22%23fafafa%22%3E%3Crect%20x%3D%2210%22%20y%3D%228%22%20width%3D%22100%22%20height%3D%2212%22%20rx%3D%222%22/%3E%3Crect%20x%3D%2225%22%20y%3D%2220%22%20width%3D%2212%22%20height%3D%2262%22%20rx%3D%222%22/%3E%3Crect%20x%3D%2275%22%20y%3D%2220%22%20width%3D%2212%22%20height%3D%2245%22%20rx%3D%222%22/%3E%3C/g%3E%3C/svg%3E">
 <title>multi-omp · dashboard</title>
 <style>
   :root { color-scheme: dark; }
