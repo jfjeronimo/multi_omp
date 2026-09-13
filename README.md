@@ -20,11 +20,14 @@ browser ──► http://<gw-host>:30140/          dashboard + control plane
   port (default `30140`): renders the dashboard, exposes the node-management
   REST API, and owns one proxy listener per node.
 - **`src/proxy.ts`** — transparent reverse proxy. Forwards path+query+method+
-  body as-is to the node origin; rewrites only the `Host` header (omp-web
-  validates it) and injects Basic auth from the local store. Response streams
-  back unchanged (SSE included). The only rewrite: the node-switcher bar is
-  appended to the root HTML document (see below) — API, SSE and asset
-  responses pass through byte-for-byte.
+  body as-is to the node origin with exactly three header modifications:
+  rewrites `Host` (omp-web validates it) and `Origin` to the node's origin
+  (omp-web's middleware 403s `/api/*` when `Origin` ≠ the request's own host —
+  without this rewrite every API call from a proxied page is rejected and
+  prompts silently vanish), and injects Basic auth from the local store.
+  Response streams back unchanged (SSE included). The only rewrite: the
+  node-switcher bar is appended to the root HTML document (see below) — API,
+  SSE and asset responses pass through byte-for-byte.
 - **`src/store.ts`** — node registry. `FileNodeStore` persists to
   `nodes.json` (`0600`) under `MULTI_OMP_HOME`; `MemoryNodeStore` for tests.
 - **`src/ports.ts`** — per-node port allocation from `30200–30299`. Ports are
@@ -65,6 +68,8 @@ the root HTML document only — API, SSE and asset responses are untouched):
 - **Live metrics** — running job count and an "awaiting you" marker when the
   node's agent is waiting on your input (pink dot).
 - **Hide button** — hides the bar for this browser only (`localStorage`).
+  While hidden, a small "▤ multi-omp" chip stays pinned at the bottom-left
+  corner of every node page; clicking it brings the bar back.
 
 The bar reuses omp-web's dark theme tokens and has no external dependencies.
 
@@ -147,8 +152,10 @@ unchanged. The only contract multi-omp relies on:
 
 1. omp-web listens on the configured host:port and answers `GET /` (for
    health checks).
-2. Its host-header validation accepts the node's own origin (true by default
-   for IP/localhost; see omp-web's `OMP_WEB_ALLOWED_HOSTS`).
+2. Its host-header validation accepts the node's own host (true by default
+   for IP/localhost; see omp-web's `OMP_WEB_ALLOWED_HOSTS`) — the proxy
+   rewrites both `Host` and `Origin` to the node's origin, so the node's
+   middleware sees a same-origin request from its own page.
 
 ## Development
 
