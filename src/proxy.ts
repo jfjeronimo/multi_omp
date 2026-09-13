@@ -4,9 +4,11 @@
  * Each node is served at the ROOT of its own dedicated port (allocated by
  * the gateway), so every absolute path the app uses (/_next/..., /api/...,
  * /recover, /manifest.webmanifest) works natively — the upstream is proxied
- * path-for-path and byte-for-byte, with exactly two modifications:
+ * path-for-path and byte-for-byte, with exactly three modifications:
  *
  *   - Host header rewritten to the node's host (omp-web validates it),
+ *   - Origin header rewritten to the node's origin (omp-web's middleware
+ *     403s /api/* when Origin ≠ the request's own host),
  *   - Basic Authorization injected from the local store (the browser never
  *     holds node credentials).
  *

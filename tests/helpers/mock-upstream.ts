@@ -15,7 +15,7 @@ export interface MockUpstream {
   server: BunServer;
   /** flip the lock on/off without restarting */
   setLocked(locked: boolean): void;
-  requests: { host: string; path: string; auth: string | null }[];
+  requests: { host: string; path: string; auth: string | null; origin: string | null }[];
 }
 
 export interface MockOptions {
@@ -49,7 +49,7 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
             const url = new URL(req.url);
             const host = req.headers.get("host") ?? "";
             const auth = req.headers.get("authorization") ?? null;
-            requests.push({ host, path: url.pathname + url.search, auth });
+            requests.push({ host, path: url.pathname + url.search, auth, origin: req.headers.get("origin") ?? null });
 
             if (rejectHost(host)) return new Response("forbidden", { status: 403 });
 
