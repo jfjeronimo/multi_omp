@@ -144,10 +144,14 @@ describe("gateway", () => {
     // Still no prefix rewriting / base tag / dashboard overlay.
     expect(html).not.toContain("<base");
     expect(html).not.toContain("multi-omp-overlay");
+    // Hidden bar must be recoverable: restore chip present, wired to un-hide.
+    expect(html).toContain('id="momo-restore"');
+    expect(html).toContain('localStorage.removeItem("momo-bar-hidden")');
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
   });
+
   test("node listener rewrites browser Origin to the node origin on api calls", async () => {
     const before = mock.requests.length;
     const res = await fetch(`http://127.0.0.1:${nodePort}/api/agent/1`, {
@@ -166,7 +170,6 @@ describe("gateway", () => {
     expect(last.origin).toBe(mock.url);
     expect(mock.requests.length).toBe(before + 1);
   });
-
 
   test("node listener proxies static asset unchanged", async () => {
     const res = await fetch(`http://127.0.0.1:${nodePort}/_next/static/chunks/main.js`);
