@@ -19,20 +19,19 @@ export interface DashboardNode {
 
 
 /**
- * Double-OMP monogram, inlined so the dashboard and node bar stay
- * self-contained (no external assets). Geometry mirrors logo-multi-omp.svg
- * in the repo root. `momo-` prefixed ids so the node bar never clashes with
- * ids on arbitrary omp-web pages it is injected into.
+ * Double-pi monogram (the Oh My Pi logo, stacked twice for multi-omp),
+ * inlined so the dashboard and node bar stay self-contained (no external
+ * assets). Geometry mirrors logo-multi-omp.svg in the repo root, derived
+ * from the official pi.dev logo mark. `momo-` prefixed ids so the node bar
+ * never clashes with ids on arbitrary omp-web pages it is injected into.
  */
-const LOGO_SVG = `<svg class="momo-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 150" aria-hidden="true">
+const LOGO_SVG = `<svg class="momo-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true">
 <defs>
-<linearGradient id="momo-g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient>
-<linearGradient id="momo-g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#c084fc"/><stop offset="100%" stop-color="#6366f1"/></linearGradient>
+<linearGradient id="momo-g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
+<linearGradient id="momo-g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
 </defs>
-<g fill="none" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
-<g transform="translate(14,10)" stroke="url(#momo-g2)" opacity=".4"><circle cx="55" cy="60" r="34"/><path d="M120 94 L120 26 L153 62 L186 26 L186 94"/><path d="M228 94 L228 26 L258 26 A19 19 0 0 1 258 64 L228 64"/></g>
-<g transform="translate(6,4)" stroke="url(#momo-g1)"><circle cx="55" cy="60" r="34"/><path d="M120 94 L120 26 L153 62 L186 26 L186 94"/><path d="M228 94 L228 26 L258 26 A19 19 0 0 1 258 64 L228 64"/></g>
-</g>
+<g fill="url(#momo-g2)" opacity=".45" transform="translate(48,-34)"><path fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path d="M517.36 400 H634.72 V634.72 H517.36 Z"/></g>
+<g fill="url(#momo-g1)"><path fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path d="M517.36 400 H634.72 V634.72 H517.36 Z"/></g>
 </svg>`;
 
 /**
@@ -70,7 +69,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20340%20150%22%3E%3Cg%20fill%3D%22none%22%20stroke-width%3D%2214%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cg%20transform%3D%22translate%2814%2C10%29%22%20opacity%3D%22.4%22%20stroke%3D%22%23c084fc%22%3E%3Ccircle%20cx%3D%2255%22%20cy%3D%2260%22%20r%3D%2234%22%2F%3E%3Cpath%20d%3D%22M120%2094%20L120%2026%20L153%2062%20L186%2026%20L186%2094%22%2F%3E%3Cpath%20d%3D%22M228%2094%20L228%2026%20L258%2026%20A19%2019%200%200%201%20258%2064%20L228%2064%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate%286%2C4%29%22%20stroke%3D%22%238b5cf6%22%3E%3Ccircle%20cx%3D%2255%22%20cy%3D%2260%22%20r%3D%2234%22%2F%3E%3Cpath%20d%3D%22M120%2094%20L120%2026%20L153%2062%20L186%2026%20L186%2094%22%2F%3E%3Cpath%20d%3D%22M228%2094%20L228%2026%20L258%2026%20A19%2019%200%200%201%20258%2064%20L228%2064%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20800%20800%22%3E%3Cg%20fill%3D%22%23a78bfa%22%20opacity%3D%22.45%22%20transform%3D%22translate%2848%2C-34%29%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M165.29%20165.29%20H517.36%20V400%20H400%20V517.36%20H282.65%20V634.72%20H165.29%20Z%20M282.65%20282.65%20V400%20H400%20V282.65%20Z%22%2F%3E%3Cpath%20d%3D%22M517.36%20400%20H634.72%20V634.72%20H517.36%20Z%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%238b5cf6%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M165.29%20165.29%20H517.36%20V400%20H400%20V517.36%20H282.65%20V634.72%20H165.29%20Z%20M282.65%20282.65%20V400%20H400%20V282.65%20Z%22%2F%3E%3Cpath%20d%3D%22M517.36%20400%20H634.72%20V634.72%20H517.36%20Z%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
 <title>multi-omp · dashboard</title>
 <style>
   :root { color-scheme: dark; }
