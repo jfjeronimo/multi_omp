@@ -1,12 +1,29 @@
 # multi-omp
 
-One gateway for all your [omp-web](https://github.com/omp-lang/omp-web) nodes.
+**One gateway for all your [omp-web](https://github.com/omp-lang/omp-web) nodes — that's it, and it's that simple.**
 
-omp-web instances live on heterogeneous machines (Windows, Debian, Raspberry Pi)
-behind firewalls and VPNs, each bound to `127.0.0.1` with Basic auth. multi-omp
-sits on one machine you can reach, registers the nodes, and serves each one at
-the root of its own local port — byte-for-byte, so the SPA works exactly as
-upstream intended, today and in future omp-web releases.
+omp-web instances live all over your network — a desktop, a Raspberry Pi, a
+Debian box behind a VPN — each bound to `127.0.0.1`, each locked with its own
+password. multi-omp sits on **one machine you can reach**, you register the
+nodes once, and from then on every node gets its own clean local port with
+omp-web running **completely unchanged**: same SPA, same API, same SSE streams,
+byte-for-byte. No forking, no patching, no "wait for the next release" — add a
+node, click open, done.
+
+## Screenshots
+
+The whole control plane is one page: register a node by name and URL, watch its
+status update live, and open it.
+
+![Dashboard with two nodes: one up, one down](docs/screenshots/dashboard.png)
+
+And on every node page you get a thin bar at the top: the current node (▸), the
+rest of your fleet with a live status dot, running jobs, and a marker when an
+agent is waiting on *your* input. One click and you're on another node. The rest
+of the page is omp-web, untouched.
+
+![Node-switcher bar on an omp-web page](docs/screenshots/nodebar.png)
+
 
 ```
 browser ──► http://<gw-host>:30140/          dashboard + control plane
@@ -16,6 +33,8 @@ browser ──► http://<gw-host>:30140/          dashboard + control plane
 
 ## Architecture
 
+Small on purpose — the whole thing is a handful of TypeScript files, no
+framework, no database:
 - **`src/gateway.ts`** — control-plane HTTP server (`Bun.serve`) on the gateway
   port (default `30140`): renders the dashboard, exposes the node-management
   REST API, and owns one proxy listener per node.
@@ -73,16 +92,32 @@ the root HTML document only — API, SSE and asset responses are untouched):
 
 The bar reuses omp-web's dark theme tokens and has no external dependencies.
 
+### Telegram notifications
+
+Leave your desk without losing the thread. Opt any node in to Telegram: open
+**edit** on that node, paste a bot token and a chat/channel id, save. That's
+the whole setup — from then on, the gateway polls the node's sessions and pings
+you the moment a session starts, finishes a turn, stops to wait for your input,
+or disappears. One message per node per state change, each with a direct link
+back to the node. The token never leaves the gateway, and it's yours to revoke
+anytime.
+
+![Telegram settings in the node edit dialog](docs/screenshots/telegram.png)
 
 ## Quick start
+
+Two commands, one open tab, and your whole fleet is behind one URL:
 
 ```sh
 bun install
 bun src/index.ts                       # dashboard on http://127.0.0.1:30140
 ```
 
-Then open the dashboard and add nodes (name, url, optional credentials), or
-use the API:
+Open the dashboard and add your first node — a name, a URL, and a password if
+the node is locked. Hit **add**, watch the status dot turn green, and open it.
+That's the whole setup.
+
+Prefer the terminal? Same thing, no UI needed:
 
 ```sh
 curl -X POST http://127.0.0.1:30140/api/nodes \
@@ -90,33 +125,51 @@ curl -X POST http://127.0.0.1:30140/api/nodes \
   -d '{"name":"Raspberry","url":"http://192.168.1.20:30141","username":"omp","password":"..."}'
 ```
 
-Each node gets a local port from `30200–30299` (shown in the dashboard's
-"Local" column) and stays on that port across restarts. If a saved port is
-held by the OS at boot (previous crash, another process), the gateway keeps
-retrying it for 15s and then re-assigns a free one, persisting the new port
-so it is stable from then on. The gateway's own port (default 30140) is
-never allocated to a node: a record that somehow carries it (e.g. an old
-`nodes.json`) is detected at boot and re-assigned automatically.
+Every node gets its own local port from `30200–30299` (the "Local" column) and
+keeps it across restarts — so your bookmarks and muscle memory survive. If a
+saved port is already taken at boot, the gateway retries it for 15 seconds and
+then picks a free one and remembers that instead; no crashes, no guessing. And
+the gateway's own port (30140) is never handed out to a node, even if an old
+`nodes.json` claims otherwise.
 
 ## Configuration (env)
 
 | Var | Default | Meaning |
-| `MULTI_OMP_HOME` | `~/.omp/multi-omp` | data dir; nodes live in `$HOME/nodes.json` |
+|---|---|---|
+| `MULTI_OMP_HOME` | `~/.omp/multi-omp` | Data dir; nodes live in `$HOME/nodes.json` |
 | `MULTI_OMP_NOTIFIER_MS` | `10000` | Telegram notifier poll interval; `0` disables it |
-| `MULTI_OMP_PORT` (or `PORT`) | `30140` | gateway/control-plane port |
-| `MULTI_OMP_HOST` (or `HOSTNAME_BIND`) | `127.0.0.1` | bind address |
+| `MULTI_OMP_PORT` (or `PORT`) | `30140` | Gateway port |
+| `MULTI_OMP_HOST` | `127.0.0.1` | Bind address |
 
 ## Docker
 
+No Bun on the machine? No problem — one image, done:
+
 ```sh
-docker compose -f docker-compose.example.yaml up -d        # builds ./Dockerfile
+docker build -t multi-omp .
 ```
 
-or deploy `portainer-stack.example.yml` as a Portainer stack (build the
-image first: `docker build -t multi-omp:latest .`). Both examples expose
-`30140` (dashboard) and `30200-30299` (per-node listeners) and persist the
-registry in a `data/` volume. Node URLs must be reachable from inside the
-container — `host.docker.internal` (see `extra_hosts`) or the node's LAN IP.
+Then pick your favorite launch and you're up:
+
+```sh
+# the full example (builds for you, adds the host.docker.internal mapping):
+docker compose -f docker-compose.example.yaml up -d
+
+# or just run it:
+docker run -d --name multi-omp --restart unless-stopped \
+  -p 30140:30140 -p 30200-30299:30200-30299 \
+  -v ./data:/data -e MULTI_OMP_HOME=/data -e MULTI_OMP_HOST=0.0.0.0 \
+  --add-host host.docker.internal:host-gateway \
+  multi-omp
+```
+
+Or deploy `portainer-stack.example.yml` as a Portainer stack (build the
+image first: `docker build -t multi-omp:latest .`). Either way: the dashboard
+lands on `30140`, every node on its own port from `30200-30299`, and the
+registry persists in the `data/` volume. One thing to know: node URLs must be
+reachable **from inside the container** — `http://host.docker.internal:30141`
+for a node on the same machine (the `extra_hosts` mapping does that for you),
+a real LAN IP for remote nodes. Then it's the same quick start as above.
 
 ## API
 
@@ -136,7 +189,8 @@ container — `host.docker.internal` (see `extra_hosts`) or the node's LAN IP.
   `MULTI_OMP_HOST` and put it behind TLS/auth — anything that can reach it can
   read node statuses and manage the registry.
 - Credentials are stored only in `nodes.json` (mode `0600`), never sent to the
-  browser (API responses carry `hasPassword` instead).
+  browser (API responses carry `hasPassword` instead). Telegram bot tokens live
+  in the same file and are used server-side only.
 - The proxy injects `Authorization` server-side; the browser never sees node
   passwords.
 - Node listeners accept connections from any interface the gateway host
