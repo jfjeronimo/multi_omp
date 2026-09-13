@@ -8,6 +8,19 @@ sits on one machine you can reach, registers the nodes, and serves each one at
 the root of its own local port — byte-for-byte, so the SPA works exactly as
 upstream intended, today and in future omp-web releases.
 
+## Screenshots
+
+The dashboard (control plane on the gateway port): register nodes by name and URL,
+watch their live status, and add credentials when a node is locked.
+
+![Dashboard with two nodes: one up, one down](docs/screenshots/dashboard.png)
+
+The node-switcher bar injected into every proxied omp-web page: current node (▸),
+other nodes with their state (the red "Raspberry (down)"), and live metrics on the
+right. The rest of the page is served byte-for-byte from the node.
+
+![Node-switcher bar on an omp-web page](docs/screenshots/nodebar.png)
+
 ```
 browser ──► http://<gw-host>:30140/          dashboard + control plane
           http://<gw-host>:30201/            node "local"  ──► 127.0.0.1:30141 (omp-web)
