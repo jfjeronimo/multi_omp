@@ -69,6 +69,42 @@ describe("proxyRequest", () => {
       restore();
     }
   });
+  test("rewrites the browser Origin to the node origin", async () => {
+    const seen: { origin?: string | null } = {};
+    const restore = mockFetch(async (_input, init) => {
+      const h = new Headers(init?.headers);
+      seen.origin = h.get("origin");
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      await proxyRequest(
+        new Request("http://127.0.0.1:30200/api/agent/42", {
+          method: "POST",
+          body: JSON.stringify({ type: "prompt", message: "hi" }),
+          headers: { "content-type": "application/json", origin: "http://127.0.0.1:30200" },
+        }),
+        node,
+      );
+      expect(seen.origin).toBe("http://192.168.1.20:30141");
+    } finally {
+      restore();
+    }
+  });
+
+  test("does not inject an Origin when the request has none", async () => {
+    const seen: { origin?: string | null } = {};
+    const restore = mockFetch(async (_input, init) => {
+      const h = new Headers(init?.headers);
+      seen.origin = h.get("origin");
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      await proxyRequest(new Request("http://127.0.0.1:30200/api/sessions"), node);
+      expect(seen.origin).toBeNull();
+    } finally {
+      restore();
+    }
+  });
 
   test("passes through status and streams the body", async () => {
     const restore = mockFetch(async () =>

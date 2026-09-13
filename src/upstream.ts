@@ -70,6 +70,11 @@ const SKIP_REQUEST_HEADERS: Record<string, true> = {
  * - Host: rewritten to the node's host. omp-web validates the Host header
  *   against its bind hostname / OMP_WEB_ALLOWED_HOSTS; IP-literal and
  *   localhost hosts are always accepted, which covers LAN/VPN setups.
+ * - Origin: rewritten to the node's origin when present. omp-web's
+ *   middleware 403s /api/* requests whose Origin does not equal the
+ *   request's own scheme://host. The browser sends the gateway's node-port
+ *   origin (the page the user is on), so without this rewrite every API
+ *   call from the proxied page is rejected — prompts silently vanish.
  * - Authorization: injected from the local store — the browser never holds
  *   the node credentials.
  * - Hop-by-hop headers: dropped.
@@ -82,6 +87,7 @@ export function buildUpstreamHeaders(req: Request, node: OmpNode): Record<string
   }
   const nodeUrl = new URL(node.url);
   headers["host"] = nodeUrl.host;
+  if (req.headers.has("origin")) headers["origin"] = nodeUrl.origin;
   const auth = authHeadersFor(node);
   if (auth) headers["authorization"] = auth["Authorization"];
   return headers;
