@@ -42,6 +42,9 @@ function corsHeaders(): Record<string, string> {
 /** Bun's HTTP server (WebSocketData = unknown, the default). */
 export type Server = Bun.Server<unknown>;
 
+/** The doubled Oh-My-Pi mark served at /favicon.ico (SVG, no binary .ico). */
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 142"><g transform="translate(46,-26)" opacity=".45"><rect x="10" y="8" width="100" height="12" rx="2" fill="#c9c9c9"/><rect x="25" y="20" width="12" height="62" rx="2" fill="#c9c9c9"/><rect x="75" y="20" width="12" height="45" rx="2" fill="#c9c9c9"/><rect x="71" y="55" width="20" height="16" rx="3" fill="#f97316"/><rect x="76" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><rect x="82" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><circle cx="18" cy="14" r="2" fill="#f97316" opacity="0.8"/><circle cx="102" cy="14" r="2" fill="#f97316" opacity="0.8"/></g><g><rect x="10" y="8" width="100" height="12" rx="2" fill="#fafafa"/><rect x="25" y="20" width="12" height="62" rx="2" fill="#fafafa"/><rect x="75" y="20" width="12" height="45" rx="2" fill="#fafafa"/><rect x="71" y="55" width="20" height="16" rx="3" fill="#f97316"/><rect x="76" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><rect x="82" y="59" width="3" height="8" rx="1" fill="#0d0d0d"/><circle cx="18" cy="14" r="2" fill="#f97316" opacity="0.8"/><circle cx="102" cy="14" r="2" fill="#f97316" opacity="0.8"/></g></svg>`;
+
 export interface NodeListener {
   id: string;
   server: Server;
@@ -499,7 +502,10 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
     const url = new URL(req.url);
     if (url.pathname === "/" && req.method === "GET") return dashboard(req);
     if (url.pathname.startsWith("/api/")) return controlPlane(req, url);
-    if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
+    if (url.pathname === "/favicon.ico")
+      return new Response(FAVICON_SVG, {
+        headers: { "content-type": "image/svg+xml" },
+      });
     return new Response(JSON.stringify({ error: "Not found" }), {
       status: 404,
       headers: { "content-type": "application/json" },
