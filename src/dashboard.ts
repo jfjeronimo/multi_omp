@@ -301,11 +301,10 @@ export function renderNodeBar(gwOrigin: string, currentId: string): string {
 #momo-bar .momo-wait{color:#f472b6}
 #momo-bar .momo-x{color:#5c6370;cursor:pointer;border:none;background:none;font:inherit;padding:0 .1rem}
 #momo-bar .momo-x:hover{color:#e6e8ea}
-#momo-restore{position:fixed;left:0;bottom:0;z-index:2147483647;cursor:pointer;
+#momo-restore{position:fixed;top:0;right:0;z-index:2147483647;cursor:pointer;
   font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#7aa2f7;
-  background:#14161af2;border:1px solid #23272e;border-left:none;border-bottom:none;
-  border-radius:0 6px 0 0;padding:.3rem .55rem;opacity:.55}
-#momo-restore:hover{opacity:1;color:#e6e8ea}
+  background:#14161af2;border:1px solid #23272e;border-top:none;border-right:none;
+  border-radius:0 0 0 6px;padding:.3rem .55rem;opacity:.55}
 body.momo-bar-on{padding-top:2.1rem!important}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
