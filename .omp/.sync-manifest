@@ -1,0 +1,12 @@
+# Generado por bootstrap-project.sh. No lo edites a mano.
+# archetype web
+# synced 2026-09-13T09:22:44Z
+1039be5f346c00f71355eb49d82f9f9742a58a349da63d971c01f93b2a2b4de9 .omp/agents/implementer.md
+4974d5df790a885858677fc366372846b15bb5e7700a1e7cc9cdc69ddfd58d68 .omp/agents/planner.md
+5e7eff92bc1a4547a4f14455909c54a938232a304d803f190f65bece1dd6ed4b .omp/agents/reviewer.md
+93b43763a2edba7e670e314f760fdf8c8f06adefa7ec30aba425aacf6804a31d .omp/agents/security-reviewer.md
+efdd25d307f00fb5fb1a3c7339f7a17448260e6224eaa75ce2086b6dcc7227fb .omp/agents/verifier.md
+8307843e1ba407e686d825f944e003a9abb01317fe25f62549cb3536005604da .omp/skills/new-project/SKILL.md
+119906f38a5cee767240b6ff949402b6f05a5e6d0b6e76d69e31cab873bb5ab2 .omp/skills/orchestrate/SKILL.md
+b6691ed41b2572757e3bb34ca66107e14340b29bfbc34804e2475f272f7b02ca .omp/skills/review-rubric/SKILL.md
+2e8f6b7fcaa85d7f2cc98768cc488f7c4c53034fb3d9aa116f1fe4eafb13ca09 .omp/scripts/bootstrap-project.sh
