@@ -217,6 +217,9 @@ describe("gateway", () => {
     // The events area for the other nodes sits in the bar center.
     expect(html).toContain('id="momo-events"');
     expect(html).toContain('fetch(GW + "/api/sessions")');
+    // Fleet health dot (right of center): green/orange/red, tooltip on hover.
+    expect(html).toContain('id="momo-fleet"');
+    expect(html).toMatch(/#momo-fleet\.f-down\{background:/);
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);

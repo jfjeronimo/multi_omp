@@ -360,7 +360,6 @@ export function renderNodeBar(gwOrigin: string, currentId: string): string {
   gap:.55rem;white-space:nowrap;overflow:hidden}
 #momo-bar .momo-events .momo-ev{min-width:0;overflow:hidden;text-overflow:ellipsis}
 #momo-bar .momo-events .err{color:#f87171}
-#momo-bar .momo-events .lock{color:#facc15}
 #momo-bar .momo-events .wait{color:#f472b6}
 #momo-bar .momo-events .ok{color:#4ade80}
 #momo-bar .momo-events .run{color:#7aa2f7}
@@ -374,6 +373,11 @@ export function renderNodeBar(gwOrigin: string, currentId: string): string {
   background:#14161af2;border:1px solid #23272e;border-top:none;border-left:none;
   border-radius:0 0 6px 0;padding:.3rem .55rem;opacity:.55}
 body.momo-bar-on{padding-top:2.1rem!important}
+#momo-fleet{width:14px;height:14px;border-radius:50%;display:inline-block;flex:none;cursor:default}
+#momo-fleet:hover{outline:1px solid #e6e8ea44}
+#momo-fleet.f-ok{background:#4ade80}
+#momo-fleet.f-warn{background:#fb923c}
+#momo-fleet.f-down{background:#f87171}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
 <div id="momo-bar">
@@ -381,7 +385,7 @@ body.momo-bar-hidden{padding-top:0!important}
   <span class="momo-title">${LOGO_SVG}multi-omp</span>
   <select id="momo-select" aria-label="Switch node"></select>
   <span class="momo-events" id="momo-events" aria-live="polite"></span>
-  <span class="momo-metrics" id="momo-metrics"></span>
+  <span class="momo-fleet f-ok" id="momo-fleet" title="Fleet: ok"></span>
   <button class="momo-x" id="momo-x" title="Hide bar (this device)">–</button>
 </div>
 <div id="momo-restore" style="display:none" title="Show multi-omp bar">▤ multi-omp</div>
@@ -395,6 +399,7 @@ body.momo-bar-hidden{padding-top:0!important}
   var met = document.getElementById("momo-metrics");
   var evEl = document.getElementById("momo-events");
   var restore = document.getElementById("momo-restore");
+  var fleet = document.getElementById("momo-fleet");
   var TRANSIENT_MS = 10000;
   var curFleet = null; // digest of the last /api/sessions payload
   var prevFleet = null; // digest of the previous one (diffing)
@@ -438,6 +443,30 @@ body.momo-bar-hidden{padding-top:0!important}
   function pushTransient(cls, text) {
     transient.push({ cls: cls, text: text, until: Date.now() + TRANSIENT_MS });
   }
+  function renderFleet() {
+    var down = [], locked = [];
+    for (var id in curFleet) {
+      var k = curFleet[id].statusKey;
+      if (k === "down") down.push(curFleet[id]);
+      else if (k === "locked") locked.push(curFleet[id]);
+    }
+    var parts = [];
+    var cls = "f-ok";
+    if (down.length > 0) {
+      cls = "f-down";
+      parts.push("caído: " + down.map(function (n) {
+        return n.name + (n.error ? " (" + n.error + ")" : "");
+      }).join(", "));
+    }
+    if (locked.length > 0) {
+      if (!down.length) cls = "f-warn";
+      parts.push("bloqueado: " + locked.map(function (n) { return n.name; }).join(", "));
+    }
+    fleet.className = "momo-fleet " + cls;
+    fleet.title = parts.length
+      ? "Fleet: " + parts.join(" · ")
+      : "Fleet: todos los nodos ok";
+  }
   function renderEvents() {
     evEl.textContent = "";
     var now = Date.now();
@@ -446,11 +475,6 @@ body.momo-bar-hidden{padding-top:0!important}
       for (var id in curFleet) {
         if (id === ME) continue;
         var n = curFleet[id];
-        if (n.statusKey === "down") {
-          items.push(["err", n.name + ": nodo caído" + (n.error ? " (" + n.error + ")" : "")]);
-        } else if (n.statusKey === "locked") {
-          items.push(["lock", n.name + ": bloqueado"]);
-        }
         var w = 0;
         for (var sid in n.sessions) if (n.sessions[sid] && n.sessions[sid].state === "waiting") w++;
         if (w > 0) items.push(["wait", n.name + ": esperando tu respuesta" + (w > 1 ? " (x" + w + ")" : "")]);
@@ -483,8 +507,6 @@ body.momo-bar-hidden{padding-top:0!important}
         var cur = next[id];
         var was = prev[id];
         if (!was) continue;
-        if (was.statusKey === "down" && cur.statusKey !== "down") pushTransient("ok", cur.name + ": recuperado");
-        if (was.statusKey === "locked" && cur.statusKey === "ok") pushTransient("ok", cur.name + ": desbloqueado");
         var seen = {};
         for (var sid in cur.sessions) seen[sid] = true;
         for (var sid2 in was.sessions) seen[sid2] = true;
@@ -500,6 +522,7 @@ body.momo-bar-hidden{padding-top:0!important}
       }
     }
     curFleet = next;
+    renderFleet();
     renderEvents();
   }
   function refresh() {
