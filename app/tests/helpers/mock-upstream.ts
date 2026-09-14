@@ -21,7 +21,7 @@ export interface MockUpstream {
    * advertises the id in runningSessionIds; `promptRunning: false` +
    * `pending > 0` classifies as waiting.
    */
-  setSessions(sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number }>): void;
+  setSessions(sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number; model?: { id: string; provider?: string } }>): void;
   requests: { host: string; path: string; auth: string | null; origin: string | null }[];
 }
 
@@ -44,7 +44,7 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
     const rejectHost = opts.rejectHost ?? defaultReject;
     let locked = opts.locked ?? false;
     const requests: MockUpstream["requests"] = [];
-    let sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number }> = {};
+    let sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number; model?: { id: string; provider?: string } }> = {};
     const password = "mock-pass";
 
     const attempt = (port: number, triesLeft: number) => {
@@ -116,6 +116,7 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
                 state: {
                   isPromptRunning: s.promptRunning !== false,
                   pendingMessageCount: s.pending ?? 0,
+                  model: s.model ?? undefined,
                 },
               });
             }

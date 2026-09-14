@@ -146,8 +146,8 @@ export interface NotifierSnapshot {
    * `normalizeTelegramEvents`.
    */
   telegramEvents?: TelegramEventKind[];
-  /** Per session: its classified state (running work / awaiting reply / idle) + display name. */
-  sessions: Record<string, { state: "running" | "waiting" | "idle"; name?: string }>;
+  /** Per session: its classified state (running work / awaiting reply / idle) + display name + the model the session talks to (id/provider from omp) and whether its /state endpoint answered (the only proxy the gateway has for the model connection, e.g. llama.cpp). */
+  sessions: Record<string, { state: "running" | "waiting" | "idle"; name?: string; model?: { id: string; provider: string; reachable: boolean } }>;
 }
 
 export interface NotifierOptions {
@@ -340,12 +340,17 @@ export function nodeSnapshot(
       await Promise.all(
         (data.runningSessionIds ?? []).map(async (sid) => {
           let state: "running" | "waiting" | "idle" = "running";
+          let model: { id: string; provider: string; reachable: boolean } | undefined;
           try {
             const r = await withTimeout(`${node.url}/api/sessions/${encodeURIComponent(sid)}/state`);
             if (r.ok) {
               const d = (await r.json()) as {
                 running?: boolean;
-                state?: { isPromptRunning?: boolean; pendingMessageCount?: number };
+                state?: {
+                  isPromptRunning?: boolean;
+                  pendingMessageCount?: number;
+                  model?: { id?: string; provider?: string };
+                };
               };
               const st = d.state;
               if (d.running === true) {
@@ -354,11 +359,14 @@ export function nodeSnapshot(
               } else {
                 state = "idle";
               }
+              if (st?.model?.id) model = { id: st.model.id, provider: st.model.provider ?? "unknown", reachable: true };
             }
           } catch {
-            // Unreachable state: keep the session counted as running.
+            // Unreachable state: keep the session counted as running, model unknown.
           }
-          result.sessions[sid] = { state, name: names[sid] };
+          const entry: { state: "running" | "waiting" | "idle"; name?: string; model?: { id: string; provider: string; reachable: boolean } } = { state, name: names[sid] };
+          if (model) entry.model = model;
+          result.sessions[sid] = entry;
         }),
       );
       return result;

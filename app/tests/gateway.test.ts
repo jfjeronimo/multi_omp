@@ -217,13 +217,14 @@ describe("gateway", () => {
     // The events area for the other nodes sits in the bar center.
     expect(html).toContain('id="momo-events"');
     expect(html).toContain('fetch(GW + "/api/sessions")');
-    // Fleet health dot (right of center): green/orange/red, tooltip on hover.
+    // Health dot (left of the logo): green/orange/red, tooltip on hover.
     expect(html).toContain('id="momo-fleet"');
     expect(html).toMatch(/#momo-fleet\.f-down\{background:/);
-    // Per-node status dot: glyph in front of the name in every option
-    // (options cannot carry HTML/colors).
-    expect(html).toContain("glyph + n.name");
-    expect(html).not.toContain("id=\"momo-dot\"");
+    // Dropdown options: no status glyph; the state goes in parentheses
+    // to the right of the name (ok/bloqueado/caído/desconocido).
+    expect(html).not.toContain("glyph");
+    expect(html).toContain('" (" + (k === "ok" ? "ok" : k === "locked" ? "bloqueado" : k === "down" ? "caído" : "desconocido") + ")"');
+    expect(html).not.toContain('id="momo-dot"');
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
@@ -240,11 +241,13 @@ describe("gateway", () => {
     }
   });
 
-  test("GET /api/sessions aggregates every node's status and session states", async () => {
-    // rasp (mock): one session actively running, one waiting for the user.
+  test("GET /api/sessions aggregates every node's status, session states and model reachability", async () => {
+    // rasp (mock): one session actively running with a reachable model, one
+    // waiting for the user, and one running without any model info.
     mock.setSessions({
-      a1: { name: "Alpha", running: true, promptRunning: true },
-      b2: { name: "Beta", running: true, promptRunning: false, pending: 2 },
+      a1: { name: "Alpha", running: true, promptRunning: true, model: { id: "qwen3.8-27B", provider: "llama.cpp" } },
+      b2: { name: "Beta", running: true, promptRunning: false, pending: 2, model: { id: "qwen3.8-27B", provider: "llama.cpp" } },
+      c3: { name: "Gamma", running: true, promptRunning: true },
     });
     const res = await gw.handle(new Request("http://gw/api/sessions"));
     expect(res.status).toBe(200);
@@ -253,7 +256,7 @@ describe("gateway", () => {
         id: string;
         name: string;
         status: { ok: boolean; locked: boolean };
-        sessions: Record<string, { state: string; name?: string }>;
+        sessions: Record<string, { state: string; name?: string; model?: { id: string; provider: string; reachable: boolean } }>;
       }>;
     };
     // Only "rasp" is stored at this point (the add-node test's "pi" was
@@ -262,8 +265,18 @@ describe("gateway", () => {
     const rasp = body.nodes.find((n) => n.id === "rasp");
     expect(rasp?.name).toBe("Raspberry");
     expect(rasp?.status.ok).toBe(true);
-    expect(rasp?.sessions.a1).toEqual({ state: "running", name: "Alpha" });
-    expect(rasp?.sessions.b2).toEqual({ state: "waiting", name: "Beta" });
+    expect(rasp?.sessions.a1).toEqual({
+      state: "running",
+      name: "Alpha",
+      model: { id: "qwen3.8-27B", provider: "llama.cpp", reachable: true },
+    });
+    expect(rasp?.sessions.b2).toEqual({
+      state: "waiting",
+      name: "Beta",
+      model: { id: "qwen3.8-27B", provider: "llama.cpp", reachable: true },
+    });
+    // A session whose /state did not report a model must not carry the key.
+    expect(rasp?.sessions.c3).toEqual({ state: "running", name: "Gamma" });
     // Clean up so later tests see an empty session map.
     mock.setSessions({});
   });

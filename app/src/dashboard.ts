@@ -376,7 +376,7 @@ body.momo-bar-on{padding-top:2.1rem!important}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
 <div id="momo-bar">
-  <span class="momo-fleet f-ok" id="momo-fleet" title="Fleet: ok"></span>
+  <span class="momo-fleet f-ok" id="momo-fleet" title="multi-omp: ok"></span>
   <span class="momo-title">${LOGO_SVG}multi-omp</span>
   <select id="momo-select" aria-label="Switch node"></select>
   <span class="momo-events" id="momo-events" aria-live="polite"></span>
@@ -436,29 +436,33 @@ body.momo-bar-hidden{padding-top:0!important}
   function pushTransient(cls, text) {
     transient.push({ cls: cls, text: text, until: Date.now() + TRANSIENT_MS });
   }
-  function renderFleet() {
-    var down = [], locked = [];
-    for (var id in curFleet) {
-      var k = curFleet[id].statusKey;
-      if (k === "down") down.push(curFleet[id]);
-      else if (k === "locked") locked.push(curFleet[id]);
+  function modelState(n) {
+    // The gateway cannot reach llama.cpp directly: the model's reachability is
+    // reported by omp per session (state.model from /api/sessions/:id/state).
+    var ms = {};
+    for (var sid in (n.sessions || {})) {
+      var m = n.sessions[sid].model;
+      if (!m) continue;
+      ms[m.id + " (" + m.provider + ")"] = m.reachable;
     }
-    var parts = [];
+    var ids = Object.keys(ms);
+    if (ids.length === 0) return { key: "none", text: "sin sesiones: modelo sin verificar" };
+    var down = ids.filter(function (i) { return !ms[i]; });
+    if (down.length > 0) return { key: "down", text: "modelo sin respuesta: " + down.join(", ") };
+    return { key: "ok", text: "modelo ok: " + ids.join(", ") };
+  }
+  function renderNode() {
+    var n = curFleet ? curFleet[ME] : null;
+    var k = n ? n.statusKey : "unknown";
+    var line = "multi-omp: " + (k === "down" ? "caído" : k === "locked" ? "bloqueado" : k === "ok" ? "ok" : "desconocido");
+    if (n && n.error && k === "down") line += " (" + n.error + ")";
+    var m = modelState(n || { sessions: {} });
+    if (m.key !== "none") line += " · " + m.text;
     var cls = "f-ok";
-    if (down.length > 0) {
-      cls = "f-down";
-      parts.push("caído: " + down.map(function (n) {
-        return n.name + (n.error ? " (" + n.error + ")" : "");
-      }).join(", "));
-    }
-    if (locked.length > 0) {
-      if (!down.length) cls = "f-warn";
-      parts.push("bloqueado: " + locked.map(function (n) { return n.name; }).join(", "));
-    }
+    if (k === "down" || m.key === "down") cls = "f-down";
+    else if (k === "locked") cls = "f-warn";
     fleet.className = "momo-fleet " + cls;
-    fleet.title = parts.length
-      ? "Fleet: " + parts.join(" · ")
-      : "Fleet: todos los nodos ok";
+    fleet.title = line;
   }
   function renderEvents() {
     evEl.textContent = "";
@@ -515,7 +519,7 @@ body.momo-bar-hidden{padding-top:0!important}
       }
     }
     curFleet = next;
-    renderFleet();
+    renderNode();
     renderEvents();
   }
   function refresh() {
@@ -541,10 +545,10 @@ body.momo-bar-hidden{padding-top:0!important}
         n.status = byStatus[n.id];
         var opt = document.createElement("option");
         opt.value = n.id;
-        // <option> cannot hold HTML or colors: the status dot is a glyph
-        // in front of the name (filled=up, half=locked, crossed=down).
-        var glyph = n.status ? (n.status.ok ? (n.status.locked ? "◐ " : "● ") : "✕ ") : "○ ";
-        var label = glyph + n.name;
+        // <option> cannot hold HTML or colors: the status goes in
+        // parentheses to the right of the name (ok/bloqueado/caído/desconocido).
+        var k = statusKey(n.status);
+        var label = n.name + " (" + (k === "ok" ? "ok" : k === "locked" ? "bloqueado" : k === "down" ? "caído" : "desconocido") + ")";
         if (n.id === ME) label = "▸ " + label;
         opt.textContent = label;
         if (n.id === ME) { me = n; opt.selected = true; }
