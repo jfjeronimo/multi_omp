@@ -33,6 +33,67 @@ export interface TelegramResult {
 }
 
 /**
+ * The per-session transitions the notifier can announce. One kind per
+ * transition `diffTransitions` detects; `EVENT_KIND_BY_STATE` maps the
+ * notifier state the transition lands in to its kind.
+ */
+export type TelegramEventKind = "started" | "waiting" | "finished" | "stopped";
+
+/** Notifier states whose transitions are announced, mapped to their kind. */
+const EVENT_KIND_BY_STATE: Record<NotifierState, TelegramEventKind> = {
+  running: "started",
+  waiting: "waiting",
+  idle: "finished",
+  stopped: "stopped",
+};
+
+/** The full set of kinds, in display order. */
+export const TELEGRAM_EVENT_KINDS: readonly TelegramEventKind[] = [
+  "started",
+  "waiting",
+  "finished",
+  "stopped",
+];
+
+const isKind = (v: unknown): v is TelegramEventKind =>
+  typeof v === "string" && (TELEGRAM_EVENT_KINDS as readonly string[]).includes(v);
+
+/**
+ * Coerce a persisted/supplied `telegramEvents` value into the ordered list
+ * of enabled kinds. Tolerant on purpose (it parses user and on-disk JSON):
+ * - `undefined` / empty / not an array -> all kinds enabled (default),
+ * - arrays keep only known kinds, in canonical order, de-duplicated,
+ * - an empty result (e.g. `["bogus"]`) falls back to the default.
+ */
+export function normalizeTelegramEvents(raw: unknown): TelegramEventKind[] {
+  if (!Array.isArray(raw)) return [...TELEGRAM_EVENT_KINDS];
+  const enabled = TELEGRAM_EVENT_KINDS.filter((k) => raw.includes(k));
+  return enabled.length > 0 ? enabled : [...TELEGRAM_EVENT_KINDS];
+}
+
+/** True when `kinds` enables every kind (i.e. nothing is filtered). */
+export function allTelegramEventsEnabled(kinds?: readonly TelegramEventKind[]): boolean {
+  const list = normalizeTelegramEvents(kinds);
+  return list.length === TELEGRAM_EVENT_KINDS.length;
+}
+
+/**
+ * Validate an API payload `telegramEvents` value. Accepts an array of the
+ * known kind strings (empty array = "announce everything" = default);
+ * anything else is rejected with a user-facing message. Returns the
+ * normalized list, or `undefined` when the caller wants the default.
+ */
+export function parseTelegramEventsParam(raw: unknown): TelegramEventKind[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || !raw.every(isKind)) {
+    throw new Error(
+      `telegramEvents must be an array of: ${TELEGRAM_EVENT_KINDS.join(", ")}`,
+    );
+  }
+  return raw.length > 0 ? [...new Set(raw)] : [...TELEGRAM_EVENT_KINDS];
+}
+
+/**
  * Send a Telegram message via the Bot API. Returns a result object; never
  * throws (the notifier must survive any failure). A 401/403 means the token
  * or chat id is wrong and is reported distinctly.
@@ -79,6 +140,12 @@ export interface NotifierSnapshot {
   port?: number;
   url: string;
   telegram: TelegramTarget | null;
+  /**
+   * Per-node allow-list of announced transitions. Absent or empty list =
+   * all kinds announced (the default); unknown entries are ignored by
+   * `normalizeTelegramEvents`.
+   */
+  telegramEvents?: TelegramEventKind[];
   /** Per session: its classified state (running work / awaiting reply / idle) + display name. */
   sessions: Record<string, { state: "running" | "waiting" | "idle"; name?: string }>;
 }
@@ -176,13 +243,18 @@ export function createSessionNotifier(opts: NotifierOptions): SessionNotifier {
       const events = diffTransitions(prev, snaps);
       prev.clear();
       for (const snap of snaps) prev.set(snap.id, classify(snap));
-      // One message per node: group that node's events into a single text.
+      // One message per node: group that node's events into a single text,
+      // skipping kinds the node has disabled (absent list = all enabled).
       const snapById = new Map(snaps.map((s) => [s.id, s]));
       const eventNodeIds = [...new Set(events.map((e) => e.nodeId))];
       for (const nodeId of eventNodeIds) {
         const snap = snapById.get(nodeId);
         if (!snap?.telegram) continue;
-        const evs = events.filter((e) => e.nodeId === nodeId);
+        const enabled = normalizeTelegramEvents(snap.telegramEvents);
+        const evs = events.filter(
+          (e) => e.nodeId === nodeId && enabled.includes(EVENT_KIND_BY_STATE[e.state]),
+        );
+        if (evs.length === 0) continue;
         const text = evs.map((e) => messageText(snap, e)).join("\n\n");
         const res = await opts.send(nodeId, text);
         if (!res.ok) console.error(`multi-omp: telegram notify for ${nodeId} failed: ${res.error}`);

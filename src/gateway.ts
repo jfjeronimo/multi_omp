@@ -20,8 +20,8 @@ import { nodeFaviconLink, renderDashboard, renderNodeBar, type DashboardNode } f
 import {
   createSessionNotifier,
   nodeSnapshot,
+  parseTelegramEventsParam,
   sendTelegram,
-  type NotifierSnapshot,
   type SessionNotifier,
 } from "./telegram";
 
@@ -314,6 +314,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
         hasPassword: Boolean(n.password),
         note: n.note,
         hasTelegram: Boolean(n.telegramToken && n.telegramChatId),
+        telegramEvents: n.telegramEvents,
         status: await statusOf(n),
       })),
     );
@@ -417,6 +418,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
           note: typeof body.note === "string" && body.note ? body.note : undefined,
           telegramToken: typeof body.telegramToken === "string" && body.telegramToken ? body.telegramToken : undefined,
           telegramChatId: typeof body.telegramChatId === "string" && body.telegramChatId ? body.telegramChatId : undefined,
+          telegramEvents: parseTelegramEventsParam(body.telegramEvents),
         });
         return new Response(JSON.stringify({ node: publicNode(node), status }), {
           status: 201,
@@ -504,6 +506,17 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
         else if (typeof body.telegramToken === "string") patch.telegramToken = body.telegramToken;
         if (body.telegramChatId === null) patch.telegramChatId = undefined;
         else if (typeof body.telegramChatId === "string") patch.telegramChatId = body.telegramChatId;
+        if (body.telegramEvents === null) patch.telegramEvents = undefined;
+        else if (body.telegramEvents !== undefined) {
+          try {
+            patch.telegramEvents = parseTelegramEventsParam(body.telegramEvents);
+          } catch (e) {
+            return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            });
+          }
+        }
         try {
           const { node: updated, status } = await updateNode(id, patch);
           return new Response(JSON.stringify({ node: publicNode(updated), status }), {
@@ -598,6 +611,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
                   n.telegramToken && n.telegramChatId
                     ? { token: n.telegramToken, chatId: n.telegramChatId }
                     : null,
+                telegramEvents: n.telegramEvents,
               };
             }),
           );

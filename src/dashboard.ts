@@ -1,10 +1,14 @@
-/**
- * Dashboard UI: the gateway's own page at /.
- *
- * Same look as omp-web (dark, monospace, #7aa2f7 accent) so the whole
- * experience feels like one product. No framework, no build step: a single
- * template string + vanilla JS that talks to the gateway control API.
- */
+// Dashboard UI: the gateway's own page at /.
+//
+// Same look as omp-web (dark, monospace, #7aa2f7 accent) so the whole
+// experience feels like one product. No framework, no build step: a single
+// template string + vanilla JS that talks to the gateway control API.
+//
+// NB: this header used to be a /** ... */ block. tsc 5.9.3 mis-parses that
+// specific file-start comment (interface members below become expression
+// statements, "Expression expected" at the first `?:`), so it stays //.
+
+import { normalizeTelegramEvents, TELEGRAM_EVENT_KINDS, type TelegramEventKind } from "./telegram";
 
 export interface DashboardNode {
   id: string;
@@ -14,6 +18,8 @@ export interface DashboardNode {
   hasPassword: boolean;
   note?: string;
   hasTelegram?: boolean;
+  /** Per-node allow-list of announced transitions; absent/empty = all. */
+  telegramEvents?: TelegramEventKind[];
   status?: { ok: boolean; locked?: boolean; latencyMs?: number; error?: string };
 }
 
@@ -82,11 +88,13 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
           ? "locked"
           : `up · ${s.latencyMs ?? "?"} ms`
         : s?.error ?? "down";
+      const tgKinds = normalizeTelegramEvents(n.telegramEvents);
+      const tgRestricted = n.hasTelegram && tgKinds.length < TELEGRAM_EVENT_KINDS.length;
       return `
-      <tr data-id="${esc(n.id)}">
+      <tr data-id="${esc(n.id)}" data-telegram-events="${esc(JSON.stringify(n.telegramEvents ?? []))}">
         <td><a class="open" href="${esc(nodeUrl(n))}" target="_blank" rel="noopener"><span class="dot ${dot}"></span>${esc(n.name)}</a></td>
         <td class="url">${esc(n.url)}</td>
-        <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg">tg</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
+        <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg" title="${tgRestricted ? esc("announces: " + tgKinds.join(", ")) : "announces: all"}">tg${tgRestricted ? ` · ${tgKinds.length}/${TELEGRAM_EVENT_KINDS.length}` : ""}</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
         <td class="actions">
           <button data-act="edit" data-id="${esc(n.id)}">edit</button>
           <button data-act="remove" data-id="${esc(n.id)}">remove</button>
@@ -144,7 +152,10 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
   dialog h3 { margin:0 0 1rem; font-size:.95rem; }
   dialog form { display:grid; gap:.7rem; }
   dialog label { color:#5c6370; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
-  dialog .row { display:flex; gap:.6rem; justify-content:flex-end; margin-top:.5rem; }
+  .tgev { display:flex; flex-wrap:wrap; gap:.35rem .9rem; margin-top:.3rem; }
+  .tgev .ck { display:flex; align-items:center; gap:.3rem; color:#e6e8ea; text-transform:none; font-size:.8rem; letter-spacing:0; }
+  .tgev input[type="checkbox"] { accent-color:#7aa2f7; margin:0; }
+  @media (max-width: 48rem) { form.add { grid-template-columns:1fr; } }
   .empty { color:#5c6370; padding:1rem 0; }
   .err { color:#f87171; font-size:.8rem; min-height:1.2rem; margin-top:.5rem; }
   footer { margin-top:3rem; color:#3f444d; font-size:.75rem; }
@@ -186,6 +197,14 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     <div><label for="e-note">Note</label><input id="e-note"></div>
     <div><label for="e-tgtok">Telegram bot token (blank = keep)</label><input id="e-tgtok" type="password" placeholder="123456:ABC-…"></div>
     <div><label for="e-tgchat">Telegram chat/channel id (blank = keep)</label><input id="e-tgchat" placeholder="@channel or -100123…"></div>
+    <div><label for="e-tgev0">Notify on (checked = announce; all off = announce everything)</label>
+      <div class="tgev">
+        <label class="ck"><input type="checkbox" id="e-tgev-started" value="started"><span>started</span></label>
+        <label class="ck"><input type="checkbox" id="e-tgev-waiting" value="waiting"><span>waiting</span></label>
+        <label class="ck"><input type="checkbox" id="e-tgev-finished" value="finished"><span>finished</span></label>
+        <label class="ck"><input type="checkbox" id="e-tgev-stopped" value="stopped"><span>stopped</span></label>
+      </div>
+    </div>
     <div class="row">
       <button type="button" id="e-cancel">cancel</button>
       <button type="submit">save</button>
@@ -240,6 +259,11 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       $("#e-pass").value = "";
       $("#e-tgtok").value = "";
       $("#e-tgchat").value = "";
+      const evs = JSON.parse(tr.dataset.telegramEvents || "[]");
+      dlg.dataset.origEvents = JSON.stringify(evs);
+      document.querySelectorAll("#edit-form input[type=checkbox][value]").forEach((cb) => {
+        cb.checked = evs.includes(cb.value);
+      });
       dlg.showModal();
     }
   });
@@ -248,14 +272,16 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     e.preventDefault();
     const err = $("#edit-err");
     err.textContent = "";
-    try {
+      const evBoxes = [...document.querySelectorAll("#edit-form input[type=checkbox][value]")].filter((cb) => cb.checked).map((cb) => cb.value);
+      const evsBefore = JSON.parse(dlg.dataset.origEvents || "[]");
+      const evsChanged = evBoxes.length !== evsBefore.length || evBoxes.some((v) => !evsBefore.includes(v));
       await post("/api/nodes/" + encodeURIComponent($("#e-id").value), {
         name: $("#e-name").value,
         url: $("#e-url").value,
         password: $("#e-pass").value || undefined,
         note: $("#e-note").value || undefined,
         telegramToken: $("#e-tgtok").value || undefined,
-        telegramChatId: $("#e-tgchat").value || undefined,
+        telegramEvents: evsChanged ? evBoxes : null,
       }, "PATCH");
       location.reload();
     } catch (e2) { err.textContent = e2.message; }

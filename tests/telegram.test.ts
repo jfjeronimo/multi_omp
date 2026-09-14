@@ -231,6 +231,99 @@ describe("createSessionNotifier", () => {
     notifier.stop();
   });
 
+  test("telegramEvents allow-list suppresses disabled kinds (incl. finished)", async () => {
+    let current: NotifierSnapshot[] = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        // Only "started" enabled: finished (state idle) must be suppressed.
+        telegramEvents: ["started"],
+        sessions: { s1: { state: "running", name: "job" } },
+      },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }));
+    await notifier.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("arrancó");
+    // Transition to idle: "finished" is disabled -> no message.
+    current = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        telegramEvents: ["started"],
+        sessions: { s1: { state: "idle", name: "job" } },
+      },
+    ];
+    await notifier.tick();
+    expect(sent).toHaveLength(1);
+    notifier.stop();
+  });
+
+  test("telegramEvents allowing finished does announce the idle transition", async () => {
+    let current: NotifierSnapshot[] = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        telegramEvents: ["finished"],
+        sessions: { s1: { state: "running", name: "job" } },
+      },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }));
+    await notifier.tick();
+    // started is disabled -> no message yet.
+    expect(sent).toHaveLength(0);
+    current = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        telegramEvents: ["finished"],
+        sessions: { s1: { state: "idle", name: "job" } },
+      },
+    ];
+    await notifier.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("finalizó");
+    notifier.stop();
+  });
+
+  test("node without telegramEvents announces every transition (default)", async () => {
+    let current: NotifierSnapshot[] = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        // no telegramEvents field: default = all kinds enabled
+        sessions: { s1: { state: "running", name: "job" } },
+      },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }));
+    await notifier.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("arrancó");
+    current = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        sessions: { s1: { state: "idle", name: "job" } },
+      },
+    ];
+    await notifier.tick();
+    expect(sent).toHaveLength(2);
+    expect(sent[1].text).toContain("finalizó");
+    notifier.stop();
+  });
+
   test("node without telegram config gets no message", async () => {
     const current: NotifierSnapshot[] = [
       { id: "a", name: "a", url: "http://a", telegram: null, sessions: { s1: { state: "running" } } },

@@ -11,6 +11,7 @@
  */
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { TelegramEventKind } from "./telegram";
 
 interface FsError extends Error {
   code?: string;
@@ -33,6 +34,11 @@ export interface OmpNode {
   telegramToken?: string;
   /** Telegram chat id (channel or user) for notifications (optional). */
   telegramChatId?: string;
+  /**
+   * Per-node allow-list of announced transitions (optional). Absent or empty
+   * list = announce all (`normalizeTelegramEvents` resolves the default).
+   */
+  telegramEvents?: TelegramEventKind[];
   /** Local port the gateway listens on to proxy this node. */
   port?: number;
 }
