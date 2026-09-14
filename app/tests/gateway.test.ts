@@ -220,6 +220,10 @@ describe("gateway", () => {
     // Fleet health dot (right of center): green/orange/red, tooltip on hover.
     expect(html).toContain('id="momo-fleet"');
     expect(html).toMatch(/#momo-fleet\.f-down\{background:/);
+    // Per-node status dot: glyph in front of the name in every option
+    // (options cannot carry HTML/colors).
+    expect(html).toContain("glyph + n.name");
+    expect(html).not.toContain("id=\"momo-dot\"");
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);

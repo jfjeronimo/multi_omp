@@ -351,11 +351,6 @@ export function renderNodeBar(gwOrigin: string, currentId: string): string {
 #momo-bar select{background:#1a1d22;color:#e6e8ea;border:1px solid #2a2e35;border-radius:5px;
   font:inherit;padding:.15rem .35rem;max-width:16rem}
 #momo-bar select:focus{outline:none;border-color:#7aa2f7}
-#momo-bar .momo-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
-#momo-bar .momo-dot.ok{background:#4ade80}
-#momo-bar .momo-dot.lock{background:#facc15}
-#momo-bar .momo-dot.down{background:#f87171}
-#momo-bar .momo-dot.wait{background:#f472b6}
 #momo-bar .momo-events{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
   gap:.55rem;white-space:nowrap;overflow:hidden}
 #momo-bar .momo-events .momo-ev{min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -381,7 +376,6 @@ body.momo-bar-on{padding-top:2.1rem!important}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
 <div id="momo-bar">
-  <span class="momo-dot down" id="momo-dot"></span>
   <span class="momo-title">${LOGO_SVG}multi-omp</span>
   <select id="momo-select" aria-label="Switch node"></select>
   <span class="momo-events" id="momo-events" aria-live="polite"></span>
@@ -395,7 +389,6 @@ body.momo-bar-hidden{padding-top:0!important}
   var ME = ${JSON.stringify(currentId)};
   var bar = document.getElementById("momo-bar");
   var sel = document.getElementById("momo-select");
-  var dot = document.getElementById("momo-dot");
   var met = document.getElementById("momo-metrics");
   var evEl = document.getElementById("momo-events");
   var restore = document.getElementById("momo-restore");
@@ -548,31 +541,26 @@ body.momo-bar-hidden{padding-top:0!important}
         n.status = byStatus[n.id];
         var opt = document.createElement("option");
         opt.value = n.id;
-        var label = n.name;
-        if (n.status && !n.status.ok) label += " (down)";
-        else if (n.status && n.status.locked) label += " (locked)";
+        // <option> cannot hold HTML or colors: the status dot is a glyph
+        // in front of the name (filled=up, half=locked, crossed=down).
+        var glyph = n.status ? (n.status.ok ? (n.status.locked ? "◐ " : "● ") : "✕ ") : "○ ";
+        var label = glyph + n.name;
         if (n.id === ME) label = "▸ " + label;
         opt.textContent = label;
         if (n.id === ME) { me = n; opt.selected = true; }
         sel.appendChild(opt);
       }
-      var st = me ? me.status : null;
-      dot.className = "momo-dot " + (st ? (st.ok ? (st.locked ? "lock" : "ok") : "down") : "down");
       if (res[2] && res[2].nodes) onFleet(res[2].nodes);
       fetch(GW + "/api/nodes/" + encodeURIComponent(ME) + "/metrics")
         .then(function (r) { return r.json(); })
         .then(function (m) {
           var html = "";
           if (typeof m.running === "number" && m.running > 0) html += '<span>jobs <b>' + m.running + '</b></span>';
-          if (typeof m.waiting === "number" && m.waiting > 0) {
-            html += '<span class="momo-wait">awaiting you</span>';
-            dot.className = "momo-dot wait";
-          }
+          if (typeof m.waiting === "number" && m.waiting > 0) html += '<span class="momo-wait">awaiting you</span>';
           met.innerHTML = html;
         })
         .catch(function () { met.innerHTML = ""; });
     }).catch(function () {
-      dot.className = "momo-dot down";
       met.innerHTML = "";
     });
   }
