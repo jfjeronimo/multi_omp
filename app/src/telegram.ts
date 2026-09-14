@@ -220,7 +220,18 @@ export function createSessionNotifier(opts: NotifierOptions): SessionNotifier {
   let running = false;
   let busy = false;
   function messageText(snap: NotifierSnapshot, ev: { session: string; state: NotifierState; name?: string }): string {
-    const link = typeof snap.port === "number" ? `http://localhost:${snap.port}/` : snap.url;
+    // Deep link: the node's own host (from its registry URL) on the gateway's
+    // proxy port for it, so the link works from any device. Falls back to the
+    // node's direct URL when no proxy port is assigned.
+    let link = snap.url;
+    if (typeof snap.port === "number") {
+      try {
+        const u = new URL(snap.url);
+        link = `${u.protocol}//${u.host.split(":")[0]}:${snap.port}/`;
+      } catch {
+        // Malformed registry URL: keep the direct URL.
+      }
+    }
     const title = ev.name ?? ev.session;
     const head = `multi-omp · ${snap.name}`;
     switch (ev.state) {

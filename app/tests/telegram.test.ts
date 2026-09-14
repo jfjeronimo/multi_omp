@@ -364,6 +364,25 @@ describe("createSessionNotifier", () => {
     notifier.stop();
   });
 
+  test("message links use the node's host on the proxy port, not localhost", async () => {
+    const current: NotifierSnapshot[] = [
+      {
+        id: "windows",
+        name: "Windows",
+        url: "http://windows.menfis:30141",
+        port: 30201,
+        telegram: target,
+        sessions: { s1: { state: "running", name: "job" } },
+      },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }));
+    await notifier.tick();
+    notifier.stop();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("http://windows.menfis:30201/");
+    expect(sent[0].text).not.toContain("localhost");
+  });
+
   test("start/stop toggles running flag", () => {
     const notifier = createSessionNotifier({
       collect: async () => [],
