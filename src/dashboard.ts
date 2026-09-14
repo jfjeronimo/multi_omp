@@ -272,6 +272,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     e.preventDefault();
     const err = $("#edit-err");
     err.textContent = "";
+    try {
       const evBoxes = [...document.querySelectorAll("#edit-form input[type=checkbox][value]")].filter((cb) => cb.checked).map((cb) => cb.value);
       const evsBefore = JSON.parse(dlg.dataset.origEvents || "[]");
       const evsChanged = evBoxes.length !== evsBefore.length || evBoxes.some((v) => !evsBefore.includes(v));
