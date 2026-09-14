@@ -212,6 +212,11 @@ describe("gateway", () => {
     // Hidden bar must be recoverable: restore chip present, wired to un-hide.
     expect(html).toContain('id="momo-restore"');
     expect(html).toContain('localStorage.removeItem("momo-bar-hidden")');
+    // Re-show button is pinned to the top-left corner (not the top-right).
+    expect(html).toMatch(/#momo-restore\{position:fixed;top:0;left:0/);
+    // The events area for the other nodes sits in the bar center.
+    expect(html).toContain('id="momo-events"');
+    expect(html).toContain('fetch(GW + "/api/sessions")');
     const last = mock.requests[mock.requests.length - 1];
     expect(last.host).toBe(`127.0.0.1:${mock.port}`);
     expect(last.auth).toBe(`Basic ${Buffer.from("omp:mock-pass").toString("base64")}`);
@@ -228,6 +233,33 @@ describe("gateway", () => {
     }
   });
 
+  test("GET /api/sessions aggregates every node's status and session states", async () => {
+    // rasp (mock): one session actively running, one waiting for the user.
+    mock.setSessions({
+      a1: { name: "Alpha", running: true, promptRunning: true },
+      b2: { name: "Beta", running: true, promptRunning: false, pending: 2 },
+    });
+    const res = await gw.handle(new Request("http://gw/api/sessions"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      nodes: Array<{
+        id: string;
+        name: string;
+        status: { ok: boolean; locked: boolean };
+        sessions: Record<string, { state: string; name?: string }>;
+      }>;
+    };
+    // Only "rasp" is stored at this point (the add-node test's "pi" was
+    // deleted by the DELETE test that runs earlier in the file).
+    expect(body.nodes.map((n) => n.id)).toEqual(["rasp"]);
+    const rasp = body.nodes.find((n) => n.id === "rasp");
+    expect(rasp?.name).toBe("Raspberry");
+    expect(rasp?.status.ok).toBe(true);
+    expect(rasp?.sessions.a1).toEqual({ state: "running", name: "Alpha" });
+    expect(rasp?.sessions.b2).toEqual({ state: "waiting", name: "Beta" });
+    // Clean up so later tests see an empty session map.
+    mock.setSessions({});
+  });
   test("node listener rewrites browser Origin to the node origin on api calls", async () => {
     const before = mock.requests.length;
     const res = await fetch(`http://127.0.0.1:${nodePort}/api/agent/1`, {
@@ -262,9 +294,14 @@ describe("gateway", () => {
   });
 
   test("node listener proxies JSON api", async () => {
+    mock.setSessions({ c3: { name: "Gamma" } });
     const res = await fetch(`http://127.0.0.1:${nodePort}/api/sessions`);
     expect(res.status).toBe(200);
-    expect((await res.json()) as unknown).toEqual({ sessions: ["s1", "s2"] });
+    expect((await res.json()) as unknown).toEqual({
+      sessions: [{ id: "c3", name: "Gamma" }],
+      runningSessionIds: ["c3"],
+    });
+    mock.setSessions({});
   });
 
   test("node listener proxies SSE stream", async () => {

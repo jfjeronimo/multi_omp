@@ -382,6 +382,21 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
       });
     }
 
+    // Aggregate fleet view for the switcher bar: per-node status + the
+    // classified state of every running session (same building blocks the
+    // Telegram notifier uses). Lets a node page notice state changes on the
+    // nodes the user is not looking at.
+    if (path === "/api/sessions" && method === "GET") {
+      const fleet = await Promise.all(
+        opts.store.list().map(async (n) => {
+          const [status, snap] = await Promise.all([statusOf(n), nodeSnapshot(n)]);
+          return { id: n.id, name: n.name, status, sessions: snap.sessions };
+        }),
+      );
+      return new Response(JSON.stringify({ nodes: fleet }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (path === "/api/nodes" && method === "GET") {
       return new Response(
         JSON.stringify({ nodes: opts.store.list().map(publicNode) }),

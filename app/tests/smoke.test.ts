@@ -16,14 +16,18 @@ const REAL_URL = "http://127.0.0.1:30141";
 const NODE_PORT = 30600;
 
 describe("smoke: real omp-web", () => {
-  let store: MemoryNodeStore;
-  let gw: Gateway;
   let skipped = false;
-
+  let store: MemoryNodeStore;
+  let gw: Gateway | undefined;
   beforeAll(async () => {
     const probe = await checkNode({ id: "p", name: "p", url: REAL_URL }, 800);
     if (!probe.ok) {
       console.log(`[smoke] skipping: no omp-web at ${REAL_URL} (${probe.error ?? "unknown"})`);
+      skipped = true;
+      return;
+    }
+    if (probe.locked) {
+      console.log(`[smoke] skipping: omp-web at ${REAL_URL} requires auth (test has no credentials)`);
       skipped = true;
       return;
     }

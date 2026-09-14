@@ -15,6 +15,13 @@ export interface MockUpstream {
   server: BunServer;
   /** flip the lock on/off without restarting */
   setLocked(locked: boolean): void;
+  /**
+   * Configure what the node reports at /api/sessions and
+   * /api/sessions/:id/state (the notifier/bar input). `running: true`
+   * advertises the id in runningSessionIds; `promptRunning: false` +
+   * `pending > 0` classifies as waiting.
+   */
+  setSessions(sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number }>): void;
   requests: { host: string; path: string; auth: string | null; origin: string | null }[];
 }
 
@@ -37,6 +44,7 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
     const rejectHost = opts.rejectHost ?? defaultReject;
     let locked = opts.locked ?? false;
     const requests: MockUpstream["requests"] = [];
+    let sessions: Record<string, { name?: string; running?: boolean; promptRunning?: boolean; pending?: number }> = {};
     const password = "mock-pass";
 
     const attempt = (port: number, triesLeft: number) => {
@@ -93,7 +101,23 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
               return new Response(`{"name":"mock"}`, { headers: { "content-type": "application/manifest+json" } });
             }
             if (url.pathname === "/api/sessions") {
-              return Response.json({ sessions: ["s1", "s2"] });
+              const ids = Object.keys(sessions);
+              return Response.json({
+                sessions: ids.map((id) => ({ id, name: sessions[id].name })),
+                runningSessionIds: ids.filter((id) => sessions[id].running !== false),
+              });
+            }
+            const sm = url.pathname.match(/^\/api\/sessions\/([^/]+)\/state$/);
+            if (sm) {
+              const s = sessions[decodeURIComponent(sm[1])];
+              if (!s) return new Response("not found", { status: 404 });
+              return Response.json({
+                running: s.running !== false,
+                state: {
+                  isPromptRunning: s.promptRunning !== false,
+                  pendingMessageCount: s.pending ?? 0,
+                },
+              });
             }
             if (url.pathname === "/api/agent/1/events") {
               const stream = new ReadableStream({
@@ -136,6 +160,7 @@ export function startMockUpstream(opts: MockOptions = {}): Promise<MockUpstream>
           port,
           server,
           setLocked: (v) => (locked = v),
+          setSessions: (v) => (sessions = v),
           requests,
         });
       })();

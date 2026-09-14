@@ -323,6 +323,17 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
  * external assets) and reuses omp-web's visual tokens so it reads as part of
  * the app.
  *
+ * The bar's center is an events area for the OTHER nodes (the ones you are
+ * not viewing). The bar polls `/api/sessions` (every node's status + the
+ * classified state of its running sessions) on the same 15s cycle as the
+ * rest of the refresh and diffs it against the previous poll, with the same
+ * transition semantics as the Telegram notifier:
+ *   - persistent while the condition lasts: node down (with reason), node
+ *     locked, a session waiting on the user;
+ *   - transient (~10s): node recovered/unlocked, a prompt started or
+ *     finished, a session that disappeared while active.
+ * Hiding the bar leaves a re-show button pinned to the top-left corner.
+ *
  * `gwOrigin` is the control-plane origin (e.g. `http://10.0.0.5:30140`) the
  * bar fetches cross-origin (CORS is enabled on the /api routes). The gateway
  * serves each node at the root of its own port on the same host, so the bar
@@ -345,15 +356,23 @@ export function renderNodeBar(gwOrigin: string, currentId: string): string {
 #momo-bar .momo-dot.lock{background:#facc15}
 #momo-bar .momo-dot.down{background:#f87171}
 #momo-bar .momo-dot.wait{background:#f472b6}
+#momo-bar .momo-events{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+  gap:.55rem;white-space:nowrap;overflow:hidden}
+#momo-bar .momo-events .momo-ev{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#momo-bar .momo-events .err{color:#f87171}
+#momo-bar .momo-events .lock{color:#facc15}
+#momo-bar .momo-events .wait{color:#f472b6}
+#momo-bar .momo-events .ok{color:#4ade80}
+#momo-bar .momo-events .run{color:#7aa2f7}
 #momo-bar .momo-metrics{color:#a8adb4;margin-left:auto;display:flex;gap:.9rem;white-space:nowrap}
 #momo-bar .momo-metrics b{color:#e6e8ea;font-weight:600}
 #momo-bar .momo-wait{color:#f472b6}
 #momo-bar .momo-x{color:#5c6370;cursor:pointer;border:none;background:none;font:inherit;padding:0 .1rem}
 #momo-bar .momo-x:hover{color:#e6e8ea}
-#momo-restore{position:fixed;top:0;right:0;z-index:2147483647;cursor:pointer;
+#momo-restore{position:fixed;top:0;left:0;z-index:2147483647;cursor:pointer;
   font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#7aa2f7;
-  background:#14161af2;border:1px solid #23272e;border-top:none;border-right:none;
-  border-radius:0 0 0 6px;padding:.3rem .55rem;opacity:.55}
+  background:#14161af2;border:1px solid #23272e;border-top:none;border-left:none;
+  border-radius:0 0 6px 0;padding:.3rem .55rem;opacity:.55}
 body.momo-bar-on{padding-top:2.1rem!important}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
@@ -361,6 +380,7 @@ body.momo-bar-hidden{padding-top:0!important}
   <span class="momo-dot down" id="momo-dot"></span>
   <span class="momo-title">${LOGO_SVG}multi-omp</span>
   <select id="momo-select" aria-label="Switch node"></select>
+  <span class="momo-events" id="momo-events" aria-live="polite"></span>
   <span class="momo-metrics" id="momo-metrics"></span>
   <button class="momo-x" id="momo-x" title="Hide bar (this device)">–</button>
 </div>
@@ -373,7 +393,12 @@ body.momo-bar-hidden{padding-top:0!important}
   var sel = document.getElementById("momo-select");
   var dot = document.getElementById("momo-dot");
   var met = document.getElementById("momo-metrics");
+  var evEl = document.getElementById("momo-events");
   var restore = document.getElementById("momo-restore");
+  var TRANSIENT_MS = 10000;
+  var curFleet = null; // digest of the last /api/sessions payload
+  var prevFleet = null; // digest of the previous one (diffing)
+  var transient = []; // { cls, text, until } short-lived transition notices
   function hideBar() {
     localStorage.setItem("momo-bar-hidden", "1");
     bar.style.display = "none";
@@ -392,12 +417,102 @@ body.momo-bar-hidden{padding-top:0!important}
   else document.body.classList.add("momo-bar-on");
   document.getElementById("momo-x").addEventListener("click", hideBar);
   restore.addEventListener("click", showBar);
+  function statusKey(s) {
+    if (!s) return "unknown";
+    if (!s.ok) return "down";
+    return s.locked ? "locked" : "ok";
+  }
+  function digest(nodes) {
+    var d = {};
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      d[n.id] = {
+        name: n.name,
+        statusKey: statusKey(n.status),
+        error: n.status ? n.status.error : null,
+        sessions: n.sessions || {},
+      };
+    }
+    return d;
+  }
+  function pushTransient(cls, text) {
+    transient.push({ cls: cls, text: text, until: Date.now() + TRANSIENT_MS });
+  }
+  function renderEvents() {
+    evEl.textContent = "";
+    var now = Date.now();
+    var items = [];
+    if (curFleet) {
+      for (var id in curFleet) {
+        if (id === ME) continue;
+        var n = curFleet[id];
+        if (n.statusKey === "down") {
+          items.push(["err", n.name + ": nodo caído" + (n.error ? " (" + n.error + ")" : "")]);
+        } else if (n.statusKey === "locked") {
+          items.push(["lock", n.name + ": bloqueado"]);
+        }
+        var w = 0;
+        for (var sid in n.sessions) if (n.sessions[sid] && n.sessions[sid].state === "waiting") w++;
+        if (w > 0) items.push(["wait", n.name + ": esperando tu respuesta" + (w > 1 ? " (x" + w + ")" : "")]);
+      }
+    }
+    var keep = [];
+    for (var t = 0; t < transient.length; t++) {
+      if (transient[t].until <= now) continue;
+      keep.push(transient[t]);
+      items.push([transient[t].cls, transient[t].text]);
+    }
+    transient = keep;
+    var titles = [];
+    for (var k = 0; k < items.length; k++) {
+      var s = document.createElement("span");
+      s.className = "momo-ev " + items[k][0];
+      s.textContent = items[k][1];
+      evEl.appendChild(s);
+      titles.push(items[k][1]);
+    }
+    evEl.title = titles.join("  ·  ");
+  }
+  function onFleet(nodes) {
+    var next = digest(nodes);
+    var prev = prevFleet;
+    prevFleet = next;
+    if (prev) {
+      for (var id in next) {
+        if (id === ME) continue;
+        var cur = next[id];
+        var was = prev[id];
+        if (!was) continue;
+        if (was.statusKey === "down" && cur.statusKey !== "down") pushTransient("ok", cur.name + ": recuperado");
+        if (was.statusKey === "locked" && cur.statusKey === "ok") pushTransient("ok", cur.name + ": desbloqueado");
+        var seen = {};
+        for (var sid in cur.sessions) seen[sid] = true;
+        for (var sid2 in was.sessions) seen[sid2] = true;
+        for (var sid3 in seen) {
+          var from = was.sessions[sid3] ? was.sessions[sid3].state : null;
+          var sess = cur.sessions[sid3];
+          var to = sess ? sess.state : null;
+          var nm = sess ? sess.name || sid3 : sid3;
+          if (to === "running" && from !== "running") pushTransient("run", cur.name + " · " + nm + ": arrancó");
+          else if (from === "running" && to === "idle") pushTransient("ok", cur.name + " · " + nm + ": finalizó");
+          else if (to === null && (from === "running" || from === "waiting")) pushTransient("err", cur.name + " · " + nm + ": detenido");
+        }
+      }
+    }
+    curFleet = next;
+    renderEvents();
+  }
   function refresh() {
     // /api/nodes has no per-node status; /api/health returns one per id.
     // Merge both so the dot + "(down)"/"(locked)" labels reflect reality.
+    // /api/sessions carries every node's status + classified sessions; the
+    // bar diffs it against the previous poll to notice changes on the other
+    // nodes (the events area). A gateway without the endpoint just leaves it
+    // null and the area stays empty.
     return Promise.all([
       fetch(GW + "/api/nodes").then(function (r) { return r.json(); }),
       fetch(GW + "/api/health").then(function (r) { return r.json(); }).catch(function () { return { statuses: [] }; }),
+      fetch(GW + "/api/sessions").then(function (r) { return r.json(); }).catch(function () { return null; }),
     ]).then(function (res) {
       var nodes = (res[0] && res[0].nodes) || [];
       var byStatus = {};
@@ -420,6 +535,7 @@ body.momo-bar-hidden{padding-top:0!important}
       }
       var st = me ? me.status : null;
       dot.className = "momo-dot " + (st ? (st.ok ? (st.locked ? "lock" : "ok") : "down") : "down");
+      if (res[2] && res[2].nodes) onFleet(res[2].nodes);
       fetch(GW + "/api/nodes/" + encodeURIComponent(ME) + "/metrics")
         .then(function (r) { return r.json(); })
         .then(function (m) {
@@ -449,6 +565,7 @@ body.momo-bar-hidden{padding-top:0!important}
   });
   refresh();
   setInterval(refresh, 15000);
+  setInterval(renderEvents, 1000); // expires transient notices
 })();
 </script>`;
 }
