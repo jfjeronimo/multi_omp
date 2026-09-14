@@ -8,7 +8,7 @@
 // specific file-start comment (interface members below become expression
 // statements, "Expression expected" at the first `?:`), so it stays //.
 
-import type { TelegramEventKind } from "./telegram";
+import { normalizeTelegramEvents, TELEGRAM_EVENT_KINDS, type TelegramEventKind } from "./telegram";
 
 export interface DashboardNode {
   id: string;
@@ -88,12 +88,13 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
           ? "locked"
           : `up · ${s.latencyMs ?? "?"} ms`
         : s?.error ?? "down";
-      const tgRestricted = n.hasTelegram && (n.telegramEvents?.length ?? 0) < 4;
+      const tgKinds = normalizeTelegramEvents(n.telegramEvents);
+      const tgRestricted = n.hasTelegram && tgKinds.length < TELEGRAM_EVENT_KINDS.length;
       return `
       <tr data-id="${esc(n.id)}" data-telegram-events="${esc(JSON.stringify(n.telegramEvents ?? []))}">
         <td><a class="open" href="${esc(nodeUrl(n))}" target="_blank" rel="noopener"><span class="dot ${dot}"></span>${esc(n.name)}</a></td>
         <td class="url">${esc(n.url)}</td>
-        <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg" title="${tgRestricted ? esc("announces: " + n.telegramEvents!.join(", ")) : "announces: all"}">tg${tgRestricted ? ` · ${n.telegramEvents!.length}/4` : ""}</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
+        <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg" title="${tgRestricted ? esc("announces: " + tgKinds.join(", ")) : "announces: all"}">tg${tgRestricted ? ` · ${tgKinds.length}/${TELEGRAM_EVENT_KINDS.length}` : ""}</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
         <td class="actions">
           <button data-act="edit" data-id="${esc(n.id)}">edit</button>
           <button data-act="remove" data-id="${esc(n.id)}">remove</button>
@@ -259,6 +260,7 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       $("#e-tgtok").value = "";
       $("#e-tgchat").value = "";
       const evs = JSON.parse(tr.dataset.telegramEvents || "[]");
+      dlg.dataset.origEvents = JSON.stringify(evs);
       document.querySelectorAll("#edit-form input[type=checkbox][value]").forEach((cb) => {
         cb.checked = evs.includes(cb.value);
       });
@@ -270,16 +272,16 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     e.preventDefault();
     const err = $("#edit-err");
     err.textContent = "";
-    try {
       const evBoxes = [...document.querySelectorAll("#edit-form input[type=checkbox][value]")].filter((cb) => cb.checked).map((cb) => cb.value);
+      const evsBefore = JSON.parse(dlg.dataset.origEvents || "[]");
+      const evsChanged = evBoxes.length !== evsBefore.length || evBoxes.some((v) => !evsBefore.includes(v));
       await post("/api/nodes/" + encodeURIComponent($("#e-id").value), {
         name: $("#e-name").value,
         url: $("#e-url").value,
         password: $("#e-pass").value || undefined,
         note: $("#e-note").value || undefined,
         telegramToken: $("#e-tgtok").value || undefined,
-        telegramChatId: $("#e-tgchat").value || undefined,
-        telegramEvents: evBoxes,
+        telegramEvents: evsChanged ? evBoxes : null,
       }, "PATCH");
       location.reload();
     } catch (e2) { err.textContent = e2.message; }

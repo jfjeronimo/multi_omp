@@ -294,6 +294,36 @@ describe("createSessionNotifier", () => {
     notifier.stop();
   });
 
+  test("node without telegramEvents announces every transition (default)", async () => {
+    let current: NotifierSnapshot[] = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        // no telegramEvents field: default = all kinds enabled
+        sessions: { s1: { state: "running", name: "job" } },
+      },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }));
+    await notifier.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("arrancó");
+    current = [
+      {
+        id: "a",
+        name: "a",
+        url: "http://a",
+        telegram: target,
+        sessions: { s1: { state: "idle", name: "job" } },
+      },
+    ];
+    await notifier.tick();
+    expect(sent).toHaveLength(2);
+    expect(sent[1].text).toContain("finalizó");
+    notifier.stop();
+  });
+
   test("node without telegram config gets no message", async () => {
     const current: NotifierSnapshot[] = [
       { id: "a", name: "a", url: "http://a", telegram: null, sessions: { s1: { state: "running" } } },
