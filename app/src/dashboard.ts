@@ -376,10 +376,10 @@ body.momo-bar-on{padding-top:2.1rem!important}
 body.momo-bar-hidden{padding-top:0!important}
 </style>
 <div id="momo-bar">
+  <span class="momo-fleet f-ok" id="momo-fleet" title="Fleet: ok"></span>
   <span class="momo-title">${LOGO_SVG}multi-omp</span>
   <select id="momo-select" aria-label="Switch node"></select>
   <span class="momo-events" id="momo-events" aria-live="polite"></span>
-  <span class="momo-fleet f-ok" id="momo-fleet" title="Fleet: ok"></span>
   <button class="momo-x" id="momo-x" title="Hide bar (this device)">–</button>
 </div>
 <div id="momo-restore" style="display:none" title="Show multi-omp bar">▤ multi-omp</div>
