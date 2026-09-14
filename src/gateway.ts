@@ -314,6 +314,7 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
         hasPassword: Boolean(n.password),
         note: n.note,
         hasTelegram: Boolean(n.telegramToken && n.telegramChatId),
+        telegramChatId: n.telegramChatId,
         telegramEvents: n.telegramEvents,
         status: await statusOf(n),
       })),
@@ -502,10 +503,32 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
         else if (typeof body.password === "string") patch.password = body.password;
         if (body.username === null) patch.username = undefined;
         else if (typeof body.username === "string") patch.username = body.username;
-        if (body.telegramToken === null) patch.telegramToken = undefined;
-        else if (typeof body.telegramToken === "string") patch.telegramToken = body.telegramToken;
-        if (body.telegramChatId === null) patch.telegramChatId = undefined;
-        else if (typeof body.telegramChatId === "string") patch.telegramChatId = body.telegramChatId;
+        if (typeof body.telegramCopyFrom === "string" && body.telegramCopyFrom) {
+          // Copy the telegram config (token, chat id, events) from another node.
+          // The token is server-side: it is never exposed to the browser, so the
+          // only way to reuse a node's config is to copy it here from the store.
+          const src = opts.store.get(body.telegramCopyFrom);
+          if (!src) {
+            return new Response(JSON.stringify({ error: `unknown node "${body.telegramCopyFrom}"` }), {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (!src.telegramToken || !src.telegramChatId) {
+            return new Response(
+              JSON.stringify({ error: `node "${body.telegramCopyFrom}" has no telegram config (token + chat id)` }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+          patch.telegramToken = src.telegramToken;
+          patch.telegramChatId = src.telegramChatId;
+          if (src.telegramEvents !== undefined) patch.telegramEvents = src.telegramEvents;
+        } else {
+          if (body.telegramToken === null) patch.telegramToken = undefined;
+          else if (typeof body.telegramToken === "string") patch.telegramToken = body.telegramToken;
+          if (body.telegramChatId === null) patch.telegramChatId = undefined;
+          else if (typeof body.telegramChatId === "string") patch.telegramChatId = body.telegramChatId;
+        }
         if (body.telegramEvents === null) patch.telegramEvents = undefined;
         else if (body.telegramEvents !== undefined) {
           try {

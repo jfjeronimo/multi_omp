@@ -125,6 +125,66 @@ describe("gateway", () => {
     expect(body.node.note).toBe("the good one");
   });
 
+  test("PATCH persists telegramChatId alongside token", async () => {
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ telegramToken: "222:ABC", telegramChatId: "-100ABC" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(store.get("rasp")?.telegramToken).toBe("222:ABC");
+    expect(store.get("rasp")?.telegramChatId).toBe("-100ABC");
+    const body = (await res.json()) as { node: Record<string, unknown> };
+    expect(body.node.hasTelegram).toBe(true);
+    expect(body.node.telegramBotId).toBe("222");
+    expect(body.node.telegramToken).toBeUndefined();
+  });
+
+  test("PATCH telegramCopyFrom copies token, chat id and events from source node", async () => {
+    const res = await gw.handle(
+      new Request("http://gw/api/nodes/pi", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Pi 5", telegramCopyFrom: "rasp" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const pi = store.get("pi");
+    expect(pi?.telegramToken).toBe("222:ABC");
+    expect(pi?.telegramChatId).toBe("-100ABC");
+    expect(pi?.telegramEvents).toEqual(store.get("rasp")?.telegramEvents);
+    // The copy is server-side: the token is never echoed to the browser.
+    const body = (await res.json()) as { node: Record<string, unknown> };
+    expect(body.node.telegramToken).toBeUndefined();
+    expect(body.node.hasTelegram).toBe(true);
+  });
+
+  test("PATCH telegramCopyFrom rejects unknown or unconfigured source", async () => {
+    const unknown = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ telegramCopyFrom: "ghost" }),
+      }),
+    );
+    expect(unknown.status).toBe(400);
+    // "pi" already has a telegram config at this point (copied from "rasp"), so
+    // add a node with none to exercise the unconfigured-source path.
+    store.add({ id: "nottg", name: "NoTg", url: mock2.url, port: 30599 });
+    const unconfigured = await gw.handle(
+      new Request("http://gw/api/nodes/rasp", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ telegramCopyFrom: "nottg" }),
+      }),
+    );
+    expect(unconfigured.status).toBe(400);
+    expect(((await unconfigured.json()) as { error: string }).error).toContain("no telegram config");
+    store.remove("nottg");
+  });
+
   test("DELETE removes a node and stops its listener", async () => {
     const res = await gw.handle(new Request("http://gw/api/nodes/pi", { method: "DELETE" }));
     expect(res.status).toBe(200);

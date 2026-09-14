@@ -18,6 +18,8 @@ export interface DashboardNode {
   hasPassword: boolean;
   note?: string;
   hasTelegram?: boolean;
+  /** Telegram chat id (non-secret) shown in the copy-from selector. */
+  telegramChatId?: string;
   /** Per-node allow-list of announced transitions; absent/empty = all. */
   telegramEvents?: TelegramEventKind[];
   status?: { ok: boolean; locked?: boolean; latencyMs?: number; error?: string };
@@ -79,6 +81,10 @@ export function nodeFaviconLink(gwOrigin: string): string {
 export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: number, version: string): string {
   const nodeUrl = (n: DashboardNode): string =>
     typeof n.port === "number" ? `http://${host}:${n.port}/` : "#";
+  const tgCopyOptions = nodes
+    .filter((n) => n.hasTelegram)
+    .map((n) => `<option value="${esc(n.id)}">${esc(n.name)} (chat ${esc(n.telegramChatId ?? "?")})</option>`)
+    .join("");
   const rows = nodes
     .map((n) => {
       const s = n.status;
@@ -89,9 +95,9 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
           : `up · ${s.latencyMs ?? "?"} ms`
         : s?.error ?? "down";
       const tgKinds = normalizeTelegramEvents(n.telegramEvents);
-      const tgRestricted = n.hasTelegram && tgKinds.length < TELEGRAM_EVENT_KINDS.length;
+      const tgRestricted = n.hasTelegram && tgKinds.length !== TELEGRAM_EVENT_KINDS.length;
       return `
-      <tr data-id="${esc(n.id)}" data-telegram-events="${esc(JSON.stringify(n.telegramEvents ?? []))}">
+      <tr data-id="${esc(n.id)}" data-telegram-events="${esc(JSON.stringify(n.telegramEvents ?? []))}" data-telegram-chat="${esc(n.telegramChatId ?? "")}">
         <td><a class="open" href="${esc(nodeUrl(n))}" target="_blank" rel="noopener"><span class="dot ${dot}"></span>${esc(n.name)}</a></td>
         <td class="url">${esc(n.url)}</td>
         <td><span class="badge">${label}</span>${n.hasTelegram ? ` <span class="badge tg" title="${tgRestricted ? esc("announces: " + tgKinds.join(", ")) : "announces: all"}">tg${tgRestricted ? ` · ${tgKinds.length}/${TELEGRAM_EVENT_KINDS.length}` : ""}</span>` : ""}${n.note ? ` <span class="note">${esc(n.note)}</span>` : ""}</td>
@@ -195,6 +201,10 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
     <div><label for="e-url">URL</label><input id="e-url" required></div>
     <div><label for="e-pass">New password (leave blank to keep)</label><input id="e-pass" type="password"></div>
     <div><label for="e-note">Note</label><input id="e-note"></div>
+    <div><label for="e-tgcopy">Copy Telegram config from</label><select id="e-tgcopy">
+      <option value="">— none —</option>
+      ${tgCopyOptions}
+    </select></div>
     <div><label for="e-tgtok">Telegram bot token (blank = keep)</label><input id="e-tgtok" type="password" placeholder="123456:ABC-…"></div>
     <div><label for="e-tgchat">Telegram chat/channel id (blank = keep)</label><input id="e-tgchat" placeholder="@channel or -100123…"></div>
     <div><label for="e-tgev0">Notify on (checked = announce; all off = announce everything)</label>
@@ -258,7 +268,8 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       $("#e-note").value = tr.querySelector(".note") ? tr.querySelector(".note").textContent : "";
       $("#e-pass").value = "";
       $("#e-tgtok").value = "";
-      $("#e-tgchat").value = "";
+      $("#e-tgcopy").value = "";
+      $("#e-tgchat").value = tr.dataset.telegramChat || "";
       const evs = JSON.parse(tr.dataset.telegramEvents || "[]");
       dlg.dataset.origEvents = JSON.stringify(evs);
       document.querySelectorAll("#edit-form input[type=checkbox][value]").forEach((cb) => {
@@ -276,14 +287,25 @@ export function renderDashboard(nodes: DashboardNode[], host: string, gwPort: nu
       const evBoxes = [...document.querySelectorAll("#edit-form input[type=checkbox][value]")].filter((cb) => cb.checked).map((cb) => cb.value);
       const evsBefore = JSON.parse(dlg.dataset.origEvents || "[]");
       const evsChanged = evBoxes.length !== evsBefore.length || evBoxes.some((v) => !evsBefore.includes(v));
-      await post("/api/nodes/" + encodeURIComponent($("#e-id").value), {
-        name: $("#e-name").value,
-        url: $("#e-url").value,
-        password: $("#e-pass").value || undefined,
-        note: $("#e-note").value || undefined,
-        telegramToken: $("#e-tgtok").value || undefined,
-        telegramEvents: evsChanged ? evBoxes : null,
-      }, "PATCH");
+      const copyFrom = $("#e-tgcopy").value;
+      const body = copyFrom
+        ? {
+            name: $("#e-name").value,
+            url: $("#e-url").value,
+            password: $("#e-pass").value || undefined,
+            note: $("#e-note").value || undefined,
+            telegramCopyFrom: copyFrom,
+          }
+        : {
+            name: $("#e-name").value,
+            url: $("#e-url").value,
+            password: $("#e-pass").value || undefined,
+            note: $("#e-note").value || undefined,
+            telegramToken: $("#e-tgtok").value || undefined,
+            telegramChatId: $("#e-tgchat").value || undefined,
+            telegramEvents: evsChanged ? evBoxes : null,
+          };
+      await post("/api/nodes/" + encodeURIComponent($("#e-id").value), body, "PATCH");
       location.reload();
     } catch (e2) { err.textContent = e2.message; }
   });
