@@ -3,6 +3,7 @@ node_modules/
 .DS_Store
 # fleet / agent-orchestration config: local to each developer, never public
 .omp/
+data/
 AGENTS.md
 PROJECT.md
 DECISIONS.md

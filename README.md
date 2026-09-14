@@ -35,10 +35,10 @@ browser ──► http://<gw-host>:30140/          dashboard + control plane
 
 Small on purpose — the whole thing is a handful of TypeScript files, no
 framework, no database:
-- **`src/gateway.ts`** — control-plane HTTP server (`Bun.serve`) on the gateway
+- **`app/src/gateway.ts`** — control-plane HTTP server (`Bun.serve`) on the gateway
   port (default `30140`): renders the dashboard, exposes the node-management
   REST API, and owns one proxy listener per node.
-- **`src/proxy.ts`** — transparent reverse proxy. Forwards path+query+method+
+- **`app/src/proxy.ts`** — transparent reverse proxy. Forwards path+query+method+
   body as-is to the node origin with exactly three header modifications:
   rewrites `Host` (omp-web validates it) and `Origin` to the node's origin
   (omp-web's middleware 403s `/api/*` when `Origin` ≠ the request's own host —
@@ -47,15 +47,15 @@ framework, no database:
   Response streams back unchanged (SSE included). The only rewrite: the
   node-switcher bar is appended to the root HTML document (see below) — API,
   SSE and asset responses pass through byte-for-byte.
-- **`src/store.ts`** — node registry. `FileNodeStore` persists to
+- **`app/src/store.ts`** — node registry. `FileNodeStore` persists to
   `nodes.json` (`0600`) under `MULTI_OMP_HOME`; `MemoryNodeStore` for tests.
-- **`src/ports.ts`** — per-node port allocation from `30200–30299`. Ports are
+- **`app/src/ports.ts`** — per-node port allocation from `30200–30299`. Ports are
   stable (stored on the node record) and verified by a real bind before use,
   so a port held by the OS is skipped, never crashed on.
-- **`src/upstream.ts`** — health checks: `200` = ok, `401` = ok+locked,
+- **`app/src/upstream.ts`** — health checks: `200` = ok, `401` = ok+locked,
   `403` = host not allowed, anything else / timeout = down.
-- **`src/dashboard.ts`** — single template string + vanilla JS. No framework.
-- **`src/telegram.ts`** — per-node Telegram notifier: polls each node's
+- **`app/src/dashboard.ts`** — single template string + vanilla JS. No framework.
+- **`app/src/telegram.ts`** — per-node Telegram notifier: polls each node's
   omp-web session API and sends a message when a tracked session finishes a
   turn, waits for input, or resumes (each transition once, until the session
   leaves that state). Nodes opt in with a bot token + chat id (set in the
@@ -110,7 +110,7 @@ Two commands, one open tab, and your whole fleet is behind one URL:
 
 ```sh
 bun install
-bun src/index.ts                       # dashboard on http://127.0.0.1:30140
+bun run app/src/index.ts                       # dashboard on http://127.0.0.1:30140
 ```
 
 Open the dashboard and add your first node — a name, a URL, and a password if

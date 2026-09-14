@@ -3,6 +3,12 @@
 # Portainer: Stack -> Add stack -> paste the part below the `---` line,
 # or upload this file. Then open http://<host>:30140/ .
 #
+# Code + dependencies are bind-mounted from the host into /app, so source
+# edits never require rebuilding the image. The host path below
+# (/opt/multi_omp/app) is the default clone location on this fleet —
+# adjust it to wherever app/ lives on your machine. One-time prerequisite:
+# `bun install` inside app/ so the mount carries a populated node_modules.
+#
 # Environment variables (all optional, defaults shown):
 #   MULTI_OMP_PORT      30140   gateway/dashboard port
 #   MULTI_OMP_HOST      0.0.0.0 bind address (0.0.0.0 inside a container)
@@ -24,6 +30,9 @@ services:
       MULTI_OMP_HOST: "0.0.0.0"
       MULTI_OMP_HOME: /data
     volumes:
+      # Code + node_modules from the host; /app inside the image is fully
+      # shadowed by this mount (that is the point: edit, no rebuild).
+      - /opt/multi_omp/app:/app
       - multi-omp-data:/data
       # Host FQDN readable inside the container as /etc/hostname (read-only).
       - /etc/hostname:/etc/hostname:ro

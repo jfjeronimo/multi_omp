@@ -1,9 +1,14 @@
 # Example docker compose stack for multi-omp.
 #
+#   bun install --cwd app     # one-time: deps inside app/ (gitignored)
 #   docker compose -f docker-compose.example.yaml up -d
 #
 # The dashboard lands on http://<host>:30140/ and each node on its own
 # port from 30200-30299 (see the "Local" column in the dashboard).
+#
+# Code + dependencies are bind-mounted from the host's app/ directory into
+# /app, so source edits never require rebuilding the image. The image is a
+# runtime only (Bun + non-root user + /data).
 #
 # Note: node URLs in MULTI_OMP_HOME/nodes.json must be reachable FROM
 # inside the container. "host.docker.internal" works on Docker Desktop
@@ -29,6 +34,10 @@ services:
       # Where nodes.json (credentials + registry) is stored on the host.
       MULTI_OMP_HOME: /data
     volumes:
+      # Code + node_modules from the host; /app inside the image is fully
+      # shadowed by this mount (that is the point: edit, no rebuild).
+      - ./app:/app
+      # Where nodes.json (credentials + registry) is stored.
       - ./data:/data
       # Host FQDN readable inside the container as /etc/hostname (read-only).
       - /etc/hostname:/etc/hostname:ro
