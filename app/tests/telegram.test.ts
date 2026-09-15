@@ -173,6 +173,7 @@ describe("createSessionNotifier", () => {
   function makeNotifier(
     getSnaps: () => NotifierSnapshot[],
     send: (nodeId: string, text: string) => Promise<{ ok: boolean }>,
+    onEvents?: (events: Array<{ nodeId: string; session: string; state: NotifierState; name?: string }>) => void,
   ) {
     const sent: Array<{ nodeId: string; text: string }> = [];
     const notifier = createSessionNotifier({
@@ -181,10 +182,44 @@ describe("createSessionNotifier", () => {
         sent.push({ nodeId, text });
         return send(nodeId, text);
       },
+      onEvents,
       intervalMs: 3600_000, // effectively never fires in tests
     });
     return { notifier, sent };
   }
+
+  test("onEvents observer sees every transition even when telegram is unconfigured", async () => {
+    let current: NotifierSnapshot[] = [
+      { id: "a", name: "a", url: "http://a", telegram: null, sessions: { s1: { state: "running", name: "job" } } },
+    ];
+    const seen: Array<{ nodeId: string; session: string; state: NotifierState; name?: string }> = [];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: false }), (ev) => {
+      for (const e of ev) seen.push(e);
+    });
+    await notifier.tick();
+    // No telegram target -> nothing sent, but the observer saw the start.
+    expect(sent).toHaveLength(0);
+    expect(seen).toEqual([{ nodeId: "a", session: "s1", state: "running", name: "job" }]);
+    // running -> idle is a second transition the observer must also get.
+    current = [{ id: "a", name: "a", url: "http://a", telegram: null, sessions: { s1: { state: "idle", name: "job" } } }];
+    await notifier.tick();
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toEqual({ nodeId: "a", session: "s1", state: "idle", name: "job" });
+    notifier.stop();
+  });
+
+  test("onEvents failure does not break the notifier or the send path", async () => {
+    let current: NotifierSnapshot[] = [
+      { id: "a", name: "a", url: "http://a", telegram: target, sessions: { s1: { state: "running", name: "job" } } },
+    ];
+    const { notifier, sent } = makeNotifier(() => current, async () => ({ ok: true }), () => {
+      throw new Error("observer boom");
+    });
+    await expect(notifier.tick()).resolves.toBeUndefined();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("arrancó");
+    notifier.stop();
+  });
 
   test("same state twice -> message only on first transition (dedupe)", async () => {
     let current: NotifierSnapshot[] = [

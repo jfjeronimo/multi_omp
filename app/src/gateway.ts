@@ -18,11 +18,13 @@ import { proxyRequest, filterResponseHeaders } from "./proxy";
 import { diagnosePortHeld, probePortFree, rangePorts, selectBindHost } from "./ports";
 import { nodeFaviconLink, renderDashboard, renderNodeBar, type DashboardNode } from "./dashboard";
 import {
+  EVENT_KIND_BY_STATE,
   createSessionNotifier,
   nodeSnapshot,
   parseTelegramEventsParam,
   sendTelegram,
   type SessionNotifier,
+  type TelegramEventKind,
 } from "./telegram";
 
 /**
@@ -354,8 +356,21 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
     return withStatus(updated);
   }
 
+  /** One row of a node's event log, as served on /api/sessions. */
+  interface FleetEvent {
+    ts: number;
+    kind: TelegramEventKind;
+    session: string;
+    name?: string;
+  }
+
+  /** Bounded per-node log of session transitions, fed by the notifier's diff. */
+  const FLEET_EVENT_CAP = 50; // rows kept per node in memory
+  const FLEET_EVENT_WINDOW = 12; // rows served per node on /api/sessions
+  const fleetEvents = new Map<string, FleetEvent[]>();
   function removeNode(id: string): boolean {
     stopNodeServer(id);
+    fleetEvents.delete(id);
     return opts.store.remove(id);
   }
 
@@ -384,13 +399,21 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
 
     // Aggregate fleet view for the switcher bar: per-node status + the
     // classified state of every running session (same building blocks the
-    // Telegram notifier uses). Lets a node page notice state changes on the
-    // nodes the user is not looking at.
+    // Telegram notifier uses) + the node's recent transition log (server-side,
+    // so the bar shows changes on every node — including the one being viewed
+    // — without diffing in the browser).
     if (path === "/api/sessions" && method === "GET") {
       const fleet = await Promise.all(
         opts.store.list().map(async (n) => {
           const [status, snap] = await Promise.all([statusOf(n), nodeSnapshot(n)]);
-          return { id: n.id, name: n.name, status, sessions: snap.sessions };
+          const log = fleetEvents.get(n.id);
+          return {
+            id: n.id,
+            name: n.name,
+            status,
+            sessions: snap.sessions,
+            events: log ? log.slice(-FLEET_EVENT_WINDOW) : [],
+          };
         }),
       );
       return new Response(JSON.stringify({ nodes: fleet }), {
@@ -661,6 +684,14 @@ export async function createGateway(opts: GatewayOptions): Promise<Gateway> {
             return Promise.resolve({ ok: false, error: "telegram not configured" });
           }
           return sendTelegram({ token: n.telegramToken, chatId: n.telegramChatId }, text);
+        },
+        onEvents: (events) => {
+          for (const e of events) {
+            const log = fleetEvents.get(e.nodeId) ?? [];
+            log.push({ ts: Date.now(), kind: EVENT_KIND_BY_STATE[e.state], session: e.session, name: e.name });
+            if (log.length > FLEET_EVENT_CAP) log.splice(0, log.length - FLEET_EVENT_CAP);
+            fleetEvents.set(e.nodeId, log);
+          }
         },
       })
     : undefined;

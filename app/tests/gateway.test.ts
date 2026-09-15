@@ -214,9 +214,17 @@ describe("gateway", () => {
     expect(html).toContain('localStorage.removeItem("momo-bar-hidden")');
     // Re-show button is pinned to the top-left corner (not the top-right).
     expect(html).toMatch(/#momo-restore\{position:fixed;top:0;left:0/);
-    // The events area for the other nodes sits in the bar center.
+    // The events area is server-driven: fed by the gateway's transition log
+    // served on /api/sessions as each node's events (incl. the current node).
     expect(html).toContain('id="momo-events"');
     expect(html).toContain('fetch(GW + "/api/sessions")');
+    expect(html).toContain("events: n.events || []");
+    expect(html).toContain('var EVENT_LABEL = { started: "arrancó"');
+    expect(html).toContain('var EVENT_CLS = { started: "run"');
+    // The old client-side diff and dead metrics block are gone.
+    expect(html).not.toContain("pushTransient");
+    expect(html).not.toContain("prevFleet");
+    expect(html).not.toContain("momo-metrics");
     // Health dot (left of the logo): green/orange/red, tooltip on hover.
     expect(html).toContain('id="momo-fleet"');
     expect(html).toMatch(/#momo-fleet\.f-down\{background:/);
@@ -257,6 +265,7 @@ describe("gateway", () => {
         name: string;
         status: { ok: boolean; locked: boolean };
         sessions: Record<string, { state: string; name?: string; model?: { id: string; provider: string; reachable: boolean } }>;
+        events: Array<{ ts: number; kind: string; session: string; name?: string }>;
       }>;
     };
     // Only "rasp" is stored at this point (the add-node test's "pi" was
@@ -277,6 +286,9 @@ describe("gateway", () => {
     });
     // A session whose /state did not report a model must not carry the key.
     expect(rasp?.sessions.c3).toEqual({ state: "running", name: "Gamma" });
+    // The notifier never runs in this suite (notifierIntervalMs: 0), so the
+    // per-node transition log is empty at baseline.
+    expect(rasp?.events).toEqual([]);
     // Clean up so later tests see an empty session map.
     mock.setSessions({});
   });

@@ -40,7 +40,7 @@ export interface TelegramResult {
 export type TelegramEventKind = "started" | "waiting" | "finished" | "stopped";
 
 /** Notifier states whose transitions are announced, mapped to their kind. */
-const EVENT_KIND_BY_STATE: Record<NotifierState, TelegramEventKind> = {
+export const EVENT_KIND_BY_STATE: Record<NotifierState, TelegramEventKind> = {
   running: "started",
   waiting: "waiting",
   idle: "finished",
@@ -159,6 +159,12 @@ export interface NotifierOptions {
   intervalMs?: number;
   /** Test hook: sleep between polls (real clock by default). */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Observer for every detected transition (before the telegram filter is
+   * applied). The gateway feeds the switcher bar's event log from this.
+   * Never awaited: a slow or throwing observer must not delay a notify.
+   */
+  onEvents?: (events: Array<{ nodeId: string; session: string; state: NotifierState; name?: string }>) => void;
 }
 
 export interface SessionNotifier {
@@ -252,6 +258,13 @@ export function createSessionNotifier(opts: NotifierOptions): SessionNotifier {
     try {
       const snaps = await opts.collect();
       const events = diffTransitions(prev, snaps);
+      if (events.length > 0) {
+        try {
+          opts.onEvents?.(events);
+        } catch (e) {
+          console.error(`multi-omp: onEvents observer failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       prev.clear();
       for (const snap of snaps) prev.set(snap.id, classify(snap));
       // One message per node: group that node's events into a single text,
